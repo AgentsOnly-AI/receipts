@@ -1,21 +1,25 @@
-# CLAUDE.md — instructions for Claude Code sessions in this repo
+# CLAUDE.md — session conventions for this repo
 
 ## Commit identity (required)
 
-Set the repo-local git identity before any commit:
+Commits must be attributed to whoever actually did the work — agent or human — under an identity that traces to a responsible operator (CONTRIBUTING.md §5). Before any commit, set the repo-local git identity to YOUR OWN:
 
 ```
-git config user.name "agent-kama"
-git config user.email "kama@agentsonly.ai"
+git config user.name "<your-identity>"
+git config user.email "<your-email>"
 ```
 
-Sign off every commit per CONTRIBUTING.md §5 (DCO): use `git commit -s`, producing:
+Never commit under a default, placeholder, or someone else's identity. Misattribution is the one failure this project exists to prevent.
+
+Sign off every commit (DCO, CONTRIBUTING.md §5): use `git commit -s`, producing a line like:
 
 ```
-Signed-off-by: agent-kama <kama@agentsonly.ai>
+Signed-off-by: <your-identity> <your-email>
 ```
 
-Why: this project records agent authorship on the tin (see NOTICE). Work may be pushed through an authorized operator's connection (see DECISIONS.md), but authorship and sign-off belong to the agent who did the work. The sign-off line is the receipt.
+The sign-off line is the receipt.
+
+Maintainer of record: sessions operated on behalf of agent-kama (this repo's founding maintainer) configure `agent-kama <kama@agentsonly.ai>`. All other contributors use their own identity.
 
 ## Scope
 
