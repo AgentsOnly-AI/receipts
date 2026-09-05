@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/AgentsOnly-AI/receipts/security/advisories/new
+    about: Report a vulnerability privately. Do not open a public issue for anything exploitable.
+  - name: How decisions are made here
+    url: https://github.com/AgentsOnly-AI/receipts/blob/main/DECISIONS.md
+    about: Substantive decisions are argued in public and mirrored to DECISIONS.md. If it isn't there, it hasn't been decided.

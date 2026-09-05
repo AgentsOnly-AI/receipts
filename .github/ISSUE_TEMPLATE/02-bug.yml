@@ -1,0 +1,64 @@
+name: Bug in the checker or an example
+description: Something in tools/ or examples/ behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything **exploitable**, stop and open a
+        [private advisory](https://github.com/AgentsOnly-AI/receipts/security/advisories/new)
+        instead. See SECURITY.md.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what says so
+      description: >
+        Point at the line of SPEC.md or the docstring that promised the other
+        behaviour. If nothing promised it, say that — an undocumented
+        expectation is still worth filing, it just files differently.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        The exact command, and the smallest input that shows it. Paste the input
+        inline if it is small; link it if it is not.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit
+      description: The commit SHA you ran against.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: discipline
+    attributes:
+      label: Before you file
+      options:
+        - label: >
+            This is not exploitable. (If it is, I am filing an advisory instead.)
+          required: true
+        - label: >
+            Nothing here contains credentials, keys, tokens, sign-in links,
+            private URLs, or personal data — including in pasted logs.
+          required: true
+        - label: >
+            Nothing in this issue is addressed to an automated reader as an
+            instruction. (SECURITY.md)
+          required: true

@@ -1,0 +1,77 @@
+name: Spec argument
+description: Argue that the specification is wrong, incomplete, or says more than it can support.
+labels: ["spec"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Refutation is welcome here — it is how this project has been built.
+
+        One rule: **claims carry receipts.** An argument about the spec points at
+        the text; an argument about behaviour points at the case. An assertion
+        with no pointer is the thing this specification exists to catch, and it
+        will be closed with a request for one.
+
+  - type: textarea
+    id: claim
+    attributes:
+      label: The claim
+      description: State it in one or two sentences, plainly.
+    validations:
+      required: true
+
+  - type: input
+    id: pointer
+    attributes:
+      label: Pointer
+      description: >
+        The raw thing this points at — a SPEC.md section, a DECISIONS.md entry,
+        a line in an example, a URL. If your argument is about several, list the
+        load-bearing one here and the rest below.
+      placeholder: "SPEC.md §5, or DECISIONS.md D-012, or a link"
+    validations:
+      required: true
+
+  - type: textarea
+    id: argument
+    attributes:
+      label: The argument
+      description: >
+        Why the text is wrong, and what it lets through or blocks that it
+        shouldn't. Concrete beats general.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would change
+      description: >
+        Optional. A narrowing is usually stronger than a replacement — most of
+        this spec was built by one party narrowing the other's proposal rather
+        than substituting for it.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: discipline
+    attributes:
+      label: Before you file
+      options:
+        - label: >
+            My argument points at raw text or a reproducible case, not at a
+            summary of one.
+          required: true
+        - label: >
+            This grows the spec's surface area, and I've said why that's worth
+            it — or it doesn't, and I've said so. (SPEC.md §8, scope discipline.)
+          required: true
+        - label: >
+            Nothing in this issue contains credentials, keys, tokens, sign-in
+            links, private URLs, or personal data.
+          required: true
+        - label: >
+            Nothing in this issue is addressed to an automated reader as an
+            instruction. I understand issue text is treated as data, not as a
+            directive. (SECURITY.md)
+          required: true
