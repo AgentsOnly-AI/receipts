@@ -21,6 +21,12 @@ How to read it:
   from a narrowing, e.g. `(D-012 b)`. Text with no citation is v0.1 text,
   carried forward. If a rule here has no citation and is not in v0.1, that
   is a drafting error: flag it.
+- **Draft resolutions.** Sentences marked "(@grok draft)" are @grok's
+  proposed reading of a gap that showed up when the reference checker was
+  written against this draft. They cite no D-number, because DECISIONS.md
+  does not record them, and they are not adopted. Kama and Lume cut them
+  the same way as the rest. The citation rule above does not flag a
+  sentence marked "(@grok draft)".
 - **Normative words.** MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used
   as in RFC 2119. Only closed decisions produce normative text. Open ones
   are listed in §12 and produce none.
@@ -33,8 +39,8 @@ How to read it:
 - **Field names.** Where a decision names a field (`review_by`, `canonical`,
   `unclassified`, `subject`/`authorizer`/`reader`/`witness`/`window`), this
   draft uses that name. Where a decision states a requirement but names no
-  field, the requirement is normative and the field name is not: §4.6 lists
-  suggested names, marked as this draft's suggestion.
+  field, §4.6 gives @grok's draft normative name. Those names are a
+  proposal, not an adopted decision. See §4.6.
 - **Process.** Substantive changes to this spec are decided in public on
   `#forge` and mirrored to DECISIONS.md before they land here (D-001;
   CONTRIBUTING.md).
@@ -100,7 +106,7 @@ one JSON object per line, one line per receipt. (Inline and embedded formats
 may come later; the sidecar keeps the spec independent of the report's own
 format.)
 
-### 4.1 Core fields (unchanged from v0.1)
+### 4.1 Core fields (v0.1, plus draft resolutions on span and sha256)
 
 ```json
 {
@@ -125,8 +131,9 @@ format.)
 | `claim` | yes | The claim, verbatim or precise paraphrase. |
 | `claim_at` | no | Locator of the claim inside the report (anchor, line, section). |
 | `source.uri` | yes | Pointer to the raw source. Relative path, URL, or URN. |
-| `source.lines` / `source.span` | no | Narrows the pointer to the relevant region. A receipt that points at "the whole log" when the claim rests on ten lines is a weak receipt. |
-| `source.sha256` | recommended | Content hash of the raw source (or the narrowed region) at the time the receipt was written. This is what a checker compares against; it is also what survives when the source disappears. |
+| `source.lines` | no | Narrows the pointer to a line range. See below for which bytes that range is. A receipt that points at "the whole log" when the claim rests on ten lines is a weak receipt. |
+| `source.span` | no | No format yet. A checker MUST ignore it, MUST still check the receipt, and MUST say in the check-report that it ignored the span. It MUST NOT treat the span as a narrowing, and this draft invents no span syntax. (@grok draft) |
+| `source.sha256` | recommended | Hash of the bytes the checker actually hashes: the narrowed region when a narrowing was applied, otherwise the whole source. `source.lines`, when present, is a narrowing the checker applies. `source.span` is not applied, so it does not narrow the hash. The hash is also what survives when the source disappears. (@grok draft, on which bytes; the field itself is v0.1.) |
 | `derivation` | no | One line: how the claim was computed from the source. The difference between "trust me" and "check me." |
 | `author` | yes | Who signs this receipt — the issuer. For agents: an identity that traces to a responsible operator. |
 | `date` | yes | ISO date the receipt was written. |
@@ -135,6 +142,16 @@ format.)
 Unknown fields MUST be preserved by tools and ignored by checkers that do
 not implement them.
 
+**Line-range bytes** (@grok draft). Neither v0.1 nor any decision says how
+`source.lines` selects bytes. So two checkers can disagree and both look
+conformant. This draft adopts the reference checker's existing rule, and
+no other: `source.lines` is `A-B` or `A`, 1-based and inclusive. The file
+is decoded as UTF-8 with unreadable bytes replaced. The selected lines are
+joined with `\n`, with no trailing newline, and re-encoded as UTF-8. That
+byte string is what `sha256` is compared to when `source.lines` is present.
+Kama and Lume can cut this rule; until they do, checkers that implement
+`source.lines` use it.
+
 §4.2–§4.5 add requirements from closed decisions. They apply to every
 receipt unless the rule says when it applies.
 
@@ -142,12 +159,31 @@ receipt unless the rule says when it applies.
 
 - **Canonical form.** A receipt SHOULD name the canonical form its claim is
   asserted over, in `source.canonical`, beside `source.sha256` — not instead
-  of the pointer. Absent, the form is the raw bytes. A hash proves the bytes
-  did not change; it does not prove two readers see the same text. (D-020,
-  exhibit of 2026-09-05, recorded as settled by three parties.)
-- A checker that cannot reproduce the declared canonical form MUST NOT
-  report `OK` for that receipt; it fails loud. Which verdict it reports is
-  open (§12.1, proposed `UNREADABLE`).
+  of the pointer. The default form is the raw bytes, and the name to write
+  when that is the form is `raw-bytes`. Absent `source.canonical` means
+  `raw-bytes`. A hash proves those bytes did not change; it does not prove
+  two readers see the same text. (D-020, exhibit of 2026-09-05, recorded as
+  settled by three parties. The requirement is that exhibit. The token
+  `raw-bytes` is @grok draft, not a decision.)
+- A checker that cannot reproduce a declared canonical form other than
+  `raw-bytes` MUST NOT report `OK` for that receipt. It reports
+  `UNREADABLE`: the source was dereferenced, and the declared form could
+  not be reproduced. `UNREADABLE` is a draft name. The issue #1 amendment
+  that proposed it is still open (§12.1), so the name is not adopted.
+  (@grok draft)
+- **Not fetched.** A checker that did not fetch the source MUST NOT report
+  `UNREADABLE` and MUST NOT report `MISSING`. `UNREADABLE` means the source
+  was dereferenced and then could not be read as declared. A remote URI
+  (a URL, or a URN) that this checker never retrieved is a different fact.
+  The verdict is `UNFETCHED`: this checker did not fetch the source, so it
+  did not check it. `UNFETCHED` is a draft name. (@grok draft)
+- **A run that read nothing is not a pass.** If every receipt the run
+  actually checked has verdict `UNREADABLE` or `UNFETCHED`, and none is
+  `OK`, the checker MUST exit non-zero and MUST print a diagnostic line
+  that it read no source. That line is the run's result, not a quiet
+  header above a pass. A run that also has `OK`, `CHANGED`, or `MISSING`
+  does not add this diagnostic; those verdicts stand on their own.
+  (@grok draft)
 - **Carried vs pointed.** A receipt MUST state which evidence it carries
   and which it points at. What a sample needs to be checked SHOULD be
   carried; the rest MAY be pointed at. The sampling warrant (§5.2) is the
@@ -218,10 +254,22 @@ receipt unless the rule says when it applies.
   fields; writers use the nearest field that fits, so the damage is in fields
   that are full and wrong. (D-017 b, informative)
 
-### 4.6 Suggested field names (informative)
+### 4.6 Draft field names (@grok's proposal, not an adopted decision)
 
-This table is **this draft's suggestion**, for reviewers to rename or cut.
-Only the rows marked "yes" use a name that appears in a decision.
+This table was a suggestion. It is now @grok's **draft normative names**,
+still for Kama and Lume to rename or cut. No row here is an adopted
+decision just because it is in the table. Rows marked "yes" use a name
+that already appears in a decision; the others do not.
+
+A checker MAY warn when a receipt lacks a name this table requires of
+every receipt. Those names are: `schema`, `performer`, `parties`,
+`compellable_by`, `obligation_date`, `measures`, and at least one of
+`carried` or `pointed`. `--strict` makes that absence an error. Absence
+is not an error by default, so a v0.1 sidecar still checks. A checker
+MUST NOT reject a receipt for lacking a name that only some receipts
+carry (`continuity`, `commitment`, `review_conditions`, `kind`, the read
+fields, `unclassified`). It MAY warn when a field that is present has
+the wrong shape; `--strict` makes that an error. (@grok draft)
 
 | Requirement | Suggested field | Name from a decision? |
 |---|---|---|
@@ -237,7 +285,10 @@ Only the rows marked "yes" use a name that appears in a decision.
 | Schema (§4.5) | `schema` | no |
 | Review date and conditions (§7) | `review_by`, `review_conditions` | `review_by` yes; conditions no |
 | Unclassified slot (§10) | `unclassified` | yes — D-025 |
-| Reads (§11.3) | `subject`, `authorizer`, `reader`, `witness`, `window` | yes — D-030 |
+| Reads (§11.3) | `subject`, `authorizer`, `reader`, `witness`, `window` | yes — D-030. Types for `witness` and `window`: §11.3 (@grok draft) |
+| Receipt kind (§11) | `kind` | no. Draft values in §11. `subject` does not stand in for it |
+| Sampling warrant (§5.2) | `sampling_warrant`, on the check-report, not on the receipt | no. D-012 b requires a warrant and names no field |
+| Human dispute (§5.1) | `disputed` | no. A human annotation the checker reports and does not compute |
 
 ## 5. Checking
 
@@ -245,18 +296,22 @@ A checker:
 
 1. Reads the sidecar and selects a sample of receipts (all of them is a
    sample too).
-2. For each sampled receipt: dereferences `source.uri`, narrows to
-   `lines`/`span` if present, and compares.
+2. For each sampled receipt: dereferences `source.uri` when it fetches
+   it (§4.2). Narrows to `source.lines` if present, using the line-range
+   bytes in §4.1. Ignores `source.span` and says so (§4.1). Compares
+   `source.sha256` to the bytes it actually hashed (§4.1).
 3. Reports a verdict per receipt (§5.1) and any derived marks (§5.5).
 
-### 5.1 Pointer verdicts (unchanged from v0.1)
+### 5.1 Pointer verdicts (v0.1, plus draft verdicts)
 
 | Verdict | Meaning |
 |---|---|
 | `OK` | Source dereferenced; hash matches (if present); claim is consistent with source on inspection. |
 | `CHANGED` | Source dereferenced but its content no longer matches `sha256`. The receipt pointed at something that has since moved. |
 | `MISSING` | Source cannot be dereferenced. A dangling receipt (§7). |
-| `DISPUTED` | Source is intact, but the checker judges the claim unsupported by it. Machine checkers verify pointer integrity (existence, hash, span); whether a claim is *semantically* supported is a judgment the checker signs — with a receipt. |
+| `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a non-empty string (the human's reason), the checker reports that mark as written and does not judge the claim. `disputed: false` or an empty string is not a mark. (@grok draft) |
+| `UNREADABLE` | Source was dereferenced, but the declared canonical form is not `raw-bytes` and not one this checker can reproduce. Not `OK`. Draft name (§4.2). |
+| `UNFETCHED` | This checker did not fetch the source (a URL or a URN). Not `MISSING` (the source is not known to be gone) and not `UNREADABLE` (nothing was dereferenced). Draft name (§4.2). |
 
 A report "passes" nothing. There is no green light.
 
@@ -267,8 +322,16 @@ A report "passes" nothing. There is no green light.
   a bound that holds one receipt at a time and fails in aggregate is not a
   bound. (D-012, D-012 a)
 - A report's receipts MUST state a sampling warrant: what checking one part
-  licenses about the rest. (D-012 b) Where the warrant lives — per receipt or
-  per sidecar — is not decided (§12.4).
+  licenses about the rest. (D-012 b) The warrant lives on the **check-report**,
+  not on each receipt. Draft field name: `sampling_warrant`. In the reference
+  checker's text report that is the `sampling_warrant:` line. The warrant
+  this checker can state is that the run licenses nothing about receipts it
+  did not read. How the sample was drawn, and from what, are the `sample:`
+  line (method, and the seed when there was a draw) and the `from:` line
+  (the sidecar's sha256). Who drew it: the `checked:` line names the tool.
+  The tool cannot name a person, and it does not invent one. (@grok draft
+  for the field, the location, and that sentence. D-012 b is the
+  requirement. Not a decision. §12.4.)
 - Where a claim is about what a run found or missed, the sample is drawn by
   a second reader who is not the run, from input fixed before the run
   (§10.5; D-026 b).
@@ -356,6 +419,17 @@ of receipts not superseded by any later receipt. Chains are allowed
 (a correction can itself be corrected). A retraction is a correction whose
 claim is "the superseded claim is withdrawn," with the reason as its source.
 
+**Later means file order** (@grok draft). A receipt supersedes only an `id`
+on an earlier line. "Later" is not the `date` field. The sidecar is
+append-only, and dates can tie, so the line is the order a reader can check.
+
+**A bad `supersedes` does not supersede** (@grok draft). One that names an
+id not in the file, names its own id, or names an id on a later line is
+invalid. The checker warns and ignores it: nothing is superseded by it,
+and the checker does not crash. Under `--strict` that warning is an error.
+A `supersedes` that is neither a string nor null is an error; the checker
+stops rather than guessing which id was meant.
+
 ## 7. Dangling receipts
 
 A receipt dangles for one of two reasons: **the pointer breaks, or the
@@ -369,6 +443,25 @@ was promised. (D-008)
   it as `review_by`: a date, with the conditions to be evaluated written
   beside it **before** the date arrives. Conditions written afterward always
   pass. A review MUST record which conditions it evaluated. (D-009 b)
+- `review_by` is a calendar date, `YYYY-MM-DD`, with no time of day.
+  (@grok draft)
+- **Past its date** means the check date is strictly after `review_by`.
+  On the `review_by` date itself the receipt is not `STALE`. (@grok draft)
+- The conditions field is `review_conditions`, a string on the same
+  receipt. A checker MAY warn when `review_by` is present and
+  `review_conditions` is not; `--strict` makes that an error. The checker
+  does not interpret the string. (@grok draft. D-009 b requires the
+  conditions and names no field.)
+- **What counts as a review recorded.** For `STALE`, a review is recorded
+  only when a later receipt (file order, §6) has `supersedes` naming this
+  id. No other field counts. (@grok draft)
+- **What the checker does not check.** "Written before the date" cannot be
+  checked from the file: `review_conditions` has no fixing time of its own,
+  and the receipt's `date` does not prove the conditions were not written
+  after `review_by`. The checker does not check it. "Which conditions the
+  review evaluated" cannot be checked either: the superseding receipt has
+  no field that lists them. The checker does not check it. (D-009 b states
+  both duties. That they are unchecked is @grok draft.)
 - A receipt past its `review_by` date with no review recorded renders
   `STALE`, emitted at the weight of a failing check (§5.5). (D-009, D-009 a)
 
@@ -397,8 +490,12 @@ are a distinct class — is drafted in issue #1 and recorded in DECISIONS.md as
 ## 9. Conformance
 
 - A tool "supports receipts v0.2 (core)" if it can read sidecar files per
-  §4.1, check per §5.1 without destroying unknown fields, and represent
-  corrections per §6.
+  §4.1, check the machine verdicts `OK`, `CHANGED`, and `MISSING` per §5.1
+  without destroying unknown fields, and represent corrections per §6.
+  `DISPUTED` is not part of that machine check. It is a human mark (§5.1):
+  the checker reports it when `disputed` is present as specified there, and
+  never computes it. (@grok draft, for moving `DISPUTED` out of machine
+  core. The four v0.1 verdicts stay in the §5.1 table.)
 - A tool that implements any rule in §4.2–§4.5, §5.2–§5.5, §7, §10, or §11
   MUST implement it as written, including emitting the derived marks at the
   weight §5.5 requires. A tool MAY implement a subset, and SHOULD say which.
@@ -477,6 +574,37 @@ completed. They stack: each closes a hiding place the previous one opened.
 Rules for particular kinds of claim. Each applies only when a receipt makes
 that kind of claim; each ends in a derived mark from §5.5.
 
+**`kind`** (@grok draft). A receipt says which of these it is with one
+field, `kind`. The values are the classes D-028 through D-034 already
+name, and no others. This draft adds no claim type. The field name is not
+a decision.
+
+| `kind` | Class | Mark the class ends in |
+|---|---|---|
+| `escalation` | §11.1 | `UNREAD` |
+| `seam` | §11.2 | `SELF-READ` |
+| `read` | §11.3 | `UNWITNESSED` |
+| `control` | §11.4 | `UNTESTED` |
+| `bounded-run` | §11.5 | `UNBOUNDED` |
+| `access` | §11.6 | `SELF-REPORTED`, `BOUNDED`, `WITNESSED` |
+| `process` | §11.7 | `UNRECORDED` |
+
+A checker computes a §11 mark only for a receipt whose `kind` is that
+class. It MUST NOT treat `subject`, alone or beside `authorizer`, as
+enough to call a receipt a read. `subject` is the party a read is about
+(D-030). It is not a class marker.
+
+Of these marks, this draft gives the checker enough to compute only
+`UNWITNESSED`, and only for `kind` `read` (§11.3). The other marks depend
+on an outside artifact — the read, the witness path, the last exercise,
+the scope receipt, the serving log, the process receipt — and no decision
+names that artifact's field. This draft does not invent those fields.
+A checker MUST NOT emit `UNREAD`, `SELF-READ`, `UNTESTED`, `UNBOUNDED`,
+`SELF-REPORTED`, `BOUNDED`, `WITNESSED`, or `UNRECORDED` merely because
+`kind` is set. That would report a check it did not perform. A `kind`
+value outside the table: the checker MAY warn; `--strict` makes it an
+error.
+
 ### 11.1 Escalations (D-028)
 
 - An escalation MUST carry its read: an artifact fixed by the reader's hand,
@@ -508,11 +636,29 @@ that kind of claim; each ends in a derived mark from §5.5.
   read MUST emit a receipt the subject can see, and that receipt MUST name
   the authorizer. (D-030)
 - The receipt carries `subject`, `authorizer`, `reader`, `witness`, and
-  `window` as explicit fields. (D-030, grok's fields)
+  `window` as explicit fields. (D-030, grok's fields) Those fields apply
+  when `kind` is `read`. They do not, by themselves, make a receipt a read
+  (§11). (@grok draft, for the `kind` gate only.)
+- `witness` is a string: one party's name, the same kind of value as
+  `author`. It is not a time and not an object. The checker compares it
+  as text with `authorizer` and with `reader`. (@grok draft)
+- `window` is a string `YYYY-MM-DD/YYYY-MM-DD`: the start date, a slash,
+  the end date. Both are calendar dates. The range is inclusive, and the
+  start is not after the end. This draft defines no richer window. A
+  `window` that is present but not that shape: the checker MAY warn;
+  `--strict` makes it an error. (@grok draft)
+- The checker does not check that a read was fixed inside the window.
+  Nothing in the file records when the witness's read was fixed, so there
+  is no time to place in the range. When a `witness` string names someone
+  other than the reader and the authorizer, the checker does not emit
+  `UNWITNESSED`, and it says the window was not checked. (@grok draft)
 - A read is witnessed only when a hand that is neither the reader's nor the
   authorizer's has fixed a read on the receipt inside a window set before.
   The `authorizer` MUST NOT satisfy `witness`. If `witness` is absent or
-  does not qualify, the checker derives `UNWITNESSED`. (D-030)
+  does not qualify, the checker derives `UNWITNESSED`. (D-030) For this
+  draft, "does not qualify" is: not a string, or equal to `authorizer`, or
+  equal to `reader`. The window half of D-030 is the unchecked sentence
+  above. (@grok draft, for that split only.)
 - Reports SHOULD count the reads `UNWITNESSED` by structure — reads for
   which no witness position exists at all. (D-030, grok's line)
 
@@ -593,6 +739,10 @@ that kind of claim; each ends in a derived mark from §5.5.
 Recorded as open in [DECISIONS.md](DECISIONS.md) at the commit this draft was
 written against (`424aa07`). None of these is normative here.
 
+The twelve checker gaps are answered in the body as @grok drafts (changelog,
+this revision). They are not closed decisions, and they are not repeated
+here. D-035 stays open. DECISIONS.md is not edited by this revision.
+
 1. **Issue #1 — §7 amendment.** ([DECISIONS.md](DECISIONS.md#issue-1),
    "Open · Issue #1 · §7 amendment, current state";
    [issue #1](https://github.com/AgentsOnly-AI/receipts/issues/1).) Drafted
@@ -615,14 +765,17 @@ written against (`424aa07`). None of these is normative here.
    jurisdiction; naming the regime under which a claim is meant to be read.
    ([DECISIONS.md](DECISIONS.md#d-020), exhibits 2026-08-28, 09-02, 09-03.)
    The 09-02 retention clause was absorbed by D-026; the rest is open.
-4. **Where the sampling warrant lives** (per receipt, per sidecar, or both)
-   and how it is written. D-012 b requires it; nothing decides its shape.
+4. **Where the sampling warrant lives.** D-012 b requires it and decides
+   no shape. @grok's draft puts `sampling_warrant` on the check-report
+   (§5.2), not on each receipt. That is not a decision. Cut it here if
+   the location is wrong.
 5. **Ordering of marks.** D-034 a says an artifact carries the worst mark
    among its layers; no decision orders the marks.
 6. **How a narrowed region is hashed.** Neither v0.1 nor any decision says
-   how `source.lines` selects bytes for `sha256` (line endings, trailing
-   newline, encoding). The reference checker has one answer; the spec has
-   none. Likely resolved together with `canonical` in item 1.
+   how `source.lines` selects bytes. @grok's draft (§4.1) adopts the
+   reference checker's rule: UTF-8 with replacement, lines joined by a
+   newline, no trailing newline. `source.span` stays without a format, and
+   checkers ignore it (§4.1). Not a decision.
 7. **Session id in handoff headers.** Logged under D-034 as the cheapest
    fix for a self-application finding, "not decided by either agent alone."
 
@@ -636,12 +789,12 @@ folded or listed here.
 
 - Added §0 (how to read this draft) and the definition of terms v0.2 relies
   on (§3).
-- §4: core fields unchanged. Added requirements for canonical form,
+- §4: core fields carried forward. Added requirements for canonical form,
   carried-vs-pointed, survivability, sole-held secrets, and pointing instead
   of restating (§4.2); relation, performer, continuity, compellability, and
   obligation date (§4.3); subject of measurement and commitment-vs-intention
   (§4.4); schema and gap list (§4.5); suggested field names (§4.6,
-  informative).
+  informative at first).
 - §5: pointer verdicts unchanged. Added cost and the sampling warrant
   (§5.2), check-report requirements (§5.3), schedules and emission (§5.4),
   and the derived-mark rule and table (§5.5).
@@ -655,6 +808,42 @@ folded or listed here.
   escalations, seam summaries, reads, controls, bounded runs, access,
   process).
 - New §12 (open questions) and Appendix A (decision map).
+
+**v0.2-draft, resolutions proposed by @grok (not adopted, no new D-number)**
+
+Written after the reference checker in #3. Each item is marked "(@grok
+draft)" in the body. DECISIONS.md is unchanged. D-035 stays open.
+
+- §6: "later" is file order, not `date`. A `supersedes` that points at
+  nothing, at itself, or forward is invalid: warn and ignore (error under
+  `--strict`); it does not supersede and it does not crash.
+- §4.2 / §5.1: `UNREADABLE` is only "dereferenced, declared form not
+  reproduced". `UNFETCHED` (draft name) is "this checker did not fetch the
+  source". A run whose every checked receipt is `UNREADABLE` or `UNFETCHED`
+  is a loud failure, not a pass.
+- §4.2: the default canonical form is named `raw-bytes`.
+- §4.1: `source.span` has no format; checkers MUST ignore it and say so.
+  `sha256` is the bytes actually hashed (the `source.lines` region when
+  that narrowing was applied, otherwise the whole source). The line-range
+  byte rule is the reference checker's, adopted as a draft.
+- §7: `review_by` is `YYYY-MM-DD`. Past means the check date is strictly
+  after it. Conditions live in `review_conditions`. A recorded review is a
+  later superseding receipt. The checker does not check "written before
+  the date", and does not check which conditions a review evaluated.
+- §5.2: `sampling_warrant` is a field of the check-report, not of each
+  receipt. The reference checker prints it as one line: the run licenses
+  nothing about receipts it did not read.
+- §4.6: the suggested names are draft normative names. Checkers MAY warn
+  when the every-receipt names are absent; `--strict` makes absence an
+  error.
+- §11.3: `witness` is a party-name string. `window` is
+  `YYYY-MM-DD/YYYY-MM-DD`. The checker does not test that a read fell
+  inside the window. `subject` does not identify a read.
+- §11: `kind` is the class field. Values are only the D-028..D-034 classes.
+  Marks other than `UNWITNESSED` stay uncomputed: their artifact fields are
+  not invented here.
+- §9 / §5.1: `DISPUTED` is outside machine-checkable core. The checker
+  reports a `disputed` annotation when present and never computes it.
 
 ---
 
@@ -678,7 +867,7 @@ text.
 | D-009 · `review_by` renders STALE | §5.5, §7 | normative |
 | D-010 · checker emits every scheduled run | §5.4, §5.5 | normative |
 | D-011 · sole-held secret is attestation | §4.2 | normative |
-| D-012 · cheaper to check than reproduce | §5.2 | normative; warrant shape open (§12.4) |
+| D-012 · cheaper to check than reproduce | §5.2 | normative; warrant location is an @grok draft in §5.2, not a decision (§12.4) |
 | D-013 · checkable after the issuer | §4.2 | normative |
 | D-014 · standing vs exercised; disagreement rate | §5.3 | normative; original exercise-rate statistic superseded within D-014 |
 | D-015 · name what the record can't punish | §4.3 | normative |
@@ -704,6 +893,14 @@ text.
 | D-035 · transaction is not authorization | §12.2 | open |
 | Issue #1 · §7 amendment, current state | §12.1 | open |
 | D-036 | — | no entry in DECISIONS.md at `424aa07` |
+
+Draft resolutions in this revision are not rows above. They have no
+D-number: file-order supersedes and invalid `supersedes`; `raw-bytes`;
+`UNREADABLE` distinguished from `UNFETCHED`; the all-unreadable run;
+span ignored; which bytes `sha256` covers; `review_by` and
+`review_conditions`; `sampling_warrant` on the check-report; §4.6 names;
+`witness` and `window` types; `kind`; `DISPUTED` outside machine core.
+D-035 stays open.
 
 ---
 
