@@ -73,7 +73,21 @@ class Gap1Canonical(unittest.TestCase):
     def test_absent_canonical_means_raw_bytes(self):
         p = run([receipt("r-1", sha256=sha(RAW))])
         self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertNotIn("diagnostic:", p.stderr)
         self.assertEqual(p.returncode, 0)
+
+    def test_named_raw_bytes_is_ok(self):
+        p = run([receipt("r-1", sha256=sha(RAW), canonical="raw-bytes")])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertNotIn("UNREADABLE", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_all_unreadable_run_is_a_loud_failure(self):
+        p = run([receipt("r-1", canonical="nfc-text")])
+        self.assertIn("[UNREADABLE] r-1", p.stdout)
+        self.assertIn("diagnostic: every checked receipt is UNREADABLE or UNFETCHED", p.stderr)
+        self.assertIn("this run read no source and is not a pass", p.stdout)
+        self.assertEqual(p.returncode, 1)
 
 
 class Gap2LineRangeHashing(unittest.TestCase):
@@ -100,15 +114,35 @@ class Gap3Span(unittest.TestCase):
 
 
 class Gap4RemoteUris(unittest.TestCase):
-    def test_url_is_unreadable_not_missing(self):
+    def test_url_is_unfetched_not_missing_or_unreadable(self):
         p = run([receipt("r-1", uri="https://example.test/raw.txt")])
-        self.assertIn("[UNREADABLE] r-1", p.stdout)
+        self.assertIn("[UNFETCHED] r-1", p.stdout)
+        self.assertNotIn("[UNREADABLE]", p.stdout)
         self.assertNotIn("MISSING", p.stdout)
+        self.assertIn("diagnostic: every checked receipt is UNREADABLE or UNFETCHED", p.stderr)
+        self.assertIn("not a pass", p.stdout)
         self.assertEqual(p.returncode, 1)
 
-    def test_urn_is_unreadable_not_missing(self):
+    def test_urn_is_unfetched_not_missing(self):
         p = run([receipt("r-1", uri="urn:example:raw")])
+        self.assertIn("[UNFETCHED] r-1", p.stdout)
+        self.assertNotIn("[UNREADABLE]", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_ok_beside_unfetched_is_not_the_all_unreadable_diagnostic(self):
+        p = run([receipt("r-1", sha256=sha(RAW)), receipt("r-2", uri="https://example.test/raw.txt")])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertIn("[UNFETCHED] r-2", p.stdout)
+        self.assertNotIn("diagnostic:", p.stderr)
+        self.assertEqual(p.returncode, 1)
+
+    def test_mixed_unreadable_and_unfetched_is_a_loud_failure(self):
+        p = run([receipt("r-1", sha256=sha(RAW), canonical="nfc-text"),
+                 receipt("r-2", uri="urn:example:raw")])
         self.assertIn("[UNREADABLE] r-1", p.stdout)
+        self.assertIn("[UNFETCHED] r-2", p.stdout)
+        self.assertIn("diagnostic: every checked receipt is UNREADABLE or UNFETCHED", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
 
 
 class Gap5SourceUri(unittest.TestCase):
@@ -193,7 +227,7 @@ class Gap8ReviewBy(unittest.TestCase):
 
     def test_bad_review_by_is_an_error(self):
         p = run([self.reviewed("soon")])
-        self.assertIn("not an ISO date", p.stderr)
+        self.assertIn("not a YYYY-MM-DD date", p.stderr)
         self.assertNotEqual(p.returncode, 0)
 
     def test_review_by_without_conditions_warns(self):
@@ -204,7 +238,8 @@ class Gap8ReviewBy(unittest.TestCase):
 
 class Gap9DerivedMarks(unittest.TestCase):
     def read(self, **kw):
-        return {**receipt("r-1"), "subject": "s", "authorizer": "a", "reader": "r", "window": "w", **kw}
+        return {**receipt("r-1"), "kind": "read", "subject": "s", "authorizer": "a",
+                "reader": "r", "window": "2026-09-01/2026-09-30", **kw}
 
     def test_unwitnessed_when_witness_absent(self):
         p = run([self.read()])
@@ -255,6 +290,43 @@ class Gap10NewRequiredFields(unittest.TestCase):
     def test_continuity_names_which_sameness(self):
         p = run([{**receipt("r-1"), "continuity": "same"}])
         self.assertIn("continuity must be party, process, or both", p.stderr)
+
+
+class KindAndDispute(unittest.TestCase):
+    def test_subject_and_authorizer_without_kind_is_not_a_read(self):
+        r = {**receipt("r-1"), "subject": "s", "authorizer": "a", "reader": "r"}
+        p = run([r])
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_unknown_kind_warns(self):
+        p = run([{**receipt("r-1"), "kind": "invoice"}])
+        self.assertIn("kind is not one of the §11 classes", p.stderr)
+        self.assertEqual(p.returncode, 0)
+
+    def test_bad_window_warns_and_strict_fails(self):
+        r = {**receipt("r-1"), "kind": "read", "subject": "s", "authorizer": "s", "window": "w"}
+        warned = run([r])
+        self.assertIn("window must be YYYY-MM-DD/YYYY-MM-DD", warned.stderr)
+        self.assertEqual(warned.returncode, 0)
+        strict = run([r], "--strict")
+        self.assertNotEqual(strict.returncode, 0)
+
+    def test_disputed_annotation_is_reported_not_computed_away(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": "claim overreaches the log"}])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertIn("[DISPUTED] r-1: human mark, not computed: claim overreaches the log", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_disputed_false_is_not_a_mark(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": False}])
+        self.assertNotIn("DISPUTED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_sampling_warrant_is_on_the_report(self):
+        p = run([receipt("r-1", sha256=sha(RAW))])
+        self.assertIn("sampling_warrant: this run licenses nothing about receipts it did not read", p.stdout)
+
 
 
 if __name__ == "__main__":

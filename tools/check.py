@@ -8,41 +8,54 @@
 #   python3 check.py <report>.receipts.jsonl [--sample N] [--seed S] [--all]
 #                                            [--today YYYY-MM-DD] [--strict]
 #
-# Verdicts per receipt: OK | CHANGED | MISSING | UNREADABLE  (superseded
-# receipts are resolved first; only the current set is sampled unless --all
-# is given). Failing marks: STALE, UNWITNESSED. Exit code 0 iff every sampled
-# receipt is OK and carries no failing mark.
+# Verdicts per receipt: OK | CHANGED | MISSING | UNREADABLE | UNFETCHED
+# (superseded receipts are resolved first; only the current set is sampled
+# unless --all is given). Failing marks: STALE, UNWITNESSED. A human
+# `disputed` annotation is reported and not computed. Exit code 0 iff every
+# sampled receipt is OK, carries no failing mark, and is not disputed.
+# A run whose every checked receipt is UNREADABLE or UNFETCHED is a loud
+# failure: non-zero exit and a diagnostic line, not a pass.
 #
 # What this checker implements of SPEC v0.2-draft (§9 asks a tool to say):
 #   §4.1   required fields, including source.uri; ids unique in the file.
-#   §5.1   OK / CHANGED / MISSING. DISPUTED is the reader's call, not a tool's.
-#   §4.2   canonical form: absent means raw bytes. SPEC v0.2 names no forms,
-#          so any declared source.canonical is UNREADABLE, never OK.
+#          sha256 is compared to the bytes actually hashed: the source.lines
+#          region when that narrowing was applied, otherwise the whole source.
+#          source.span has no format and is ignored; the output says so.
+#   §5.1   machine verdicts OK / CHANGED / MISSING. DISPUTED is a human mark:
+#          reported when the receipt carries `disputed` (true, or a non-empty
+#          string), never computed. Not part of machine core.
+#   §4.2   canonical form: absent, or the draft name "raw-bytes", means raw
+#          bytes. Any other declared source.canonical is UNREADABLE (source
+#          was read, form not reproduced), never OK. UNREADABLE is a draft name.
+#   §4.2   UNFETCHED (draft name): a URL or URN this checker did not fetch.
+#          Not MISSING, and not UNREADABLE.
 #   §6     a receipt supersedes only a receipt on an earlier line ("later"
-#          read as later in the append-only file). A supersedes that names no
-#          earlier id is flagged and has no effect.
-#   §7     review_by: STALE once --today is past the date and no later receipt
-#          supersedes it (the only "review recorded" this tool can see).
-#   §11.3  UNWITNESSED, partly: a read (a receipt with subject and authorizer)
-#          whose subject is not its authorizer, and whose witness is absent or
-#          is the reader or the authorizer. The window is not checked.
-#   §4.2-§4.5 fields v0.2 requires: warnings by default, errors with
-#          --strict. The names are SPEC §4.6's suggestions, not decided ones.
+#          is file order, not the date field). A supersedes that names nothing
+#          in the file, itself, or a later line is warned and ignored (an
+#          error under --strict). It does not supersede.
+#   §7     review_by is YYYY-MM-DD. STALE once --today is strictly after that
+#          date and no later receipt supersedes it (the only "review recorded"
+#          this tool can see). It does not check that review_conditions were
+#          written before the date.
+#   §5.2   sampling_warrant is a line of this check-report, not a field on
+#          each receipt: the run licenses nothing about receipts it did not read.
+#   §11    kind names the class. UNWITNESSED only for kind "read" (§11.3):
+#          subject is not the authorizer, and witness is absent, not a string,
+#          or is the reader or the authorizer. witness is a party-name string.
+#          window is YYYY-MM-DD/YYYY-MM-DD and is not checked against a time.
+#          subject does not make a receipt a read.
+#   §4.6   draft normative names, @grok's proposal, not an adopted decision.
+#          Missing every-receipt names: warnings by default, errors with --strict.
 # Not implemented: UNREAD, SELF-READ, UNTESTED, UNBOUNDED, SELF-REPORTED,
-# BOUNDED, WITNESSED, UNRECORDED (no field names or class markers in the
-# spec), scheduled emission (§5.4), and writing the check-report as a
-# receipts file (it goes to stdout).
-#
-# UNREADABLE is provisional: SPEC v0.2 §4.2 leaves the name open (§12.1).
-# It is also used for URLs and URNs, which this checker does not fetch, so
-# a checker limitation does not land in the MISSING (source gone) column.
+# BOUNDED, WITNESSED, UNRECORDED. kind selects the class, but no decision
+# names those artifacts' fields, and this checker does not invent them.
+# Scheduled emission (§5.4) is outside one run. The check-report goes to
+# stdout, not a receipts file.
 #
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
 # the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
-# trailing newline, re-encoded as UTF-8. SPEC v0.2 does not define this
-# (§12.6); it is the v0.1 checker's rule, kept unchanged. source.span has no
-# format in the spec, so it is not applied: the whole file (or the lines
-# range) is hashed as raw bytes, and the output says so.
+# trailing newline, re-encoded as UTF-8. SPEC v0.2-draft adopts this as
+# @grok's draft rule (§4.1). source.span is not applied.
 
 import argparse
 import hashlib
@@ -53,8 +66,13 @@ from datetime import date
 from pathlib import Path
 
 UNREADABLE = "UNREADABLE"
+UNFETCHED = "UNFETCHED"
+RAW_BYTES = "raw-bytes"
+# Draft class names (§11). No new claim types.
+KINDS = {"escalation", "seam", "read", "control", "bounded-run", "access", "process"}
 
-# Fields SPEC v0.2 requires with no decided name. Names are §4.6 suggestions.
+# Fields SPEC v0.2 requires of every receipt. Names are §4.6 draft normative
+# names (@grok's proposal, not an adopted decision).
 V02_FIELDS = [
     (("schema",), "§4.5"),
     (("performer",), "§4.3"),
@@ -81,7 +99,33 @@ def v02_notes(r):
         notes.append("continuity must be party, process, or both (§4.3)")
     if "review_by" in r and "review_conditions" not in r:
         notes.append("review_by has no review_conditions beside it (§7)")
+    if "kind" in r and r["kind"] not in KINDS:
+        notes.append("kind is not one of the §11 classes (escalation, seam, read, "
+                     "control, bounded-run, access, process)")
+    if "window" in r and not window_ok(r["window"]):
+        notes.append("window must be YYYY-MM-DD/YYYY-MM-DD (§11.3)")
     return notes
+
+
+def ymd_ok(value):
+    """A calendar date YYYY-MM-DD, and nothing else (no compact form, no time)."""
+    if not isinstance(value, str) or len(value) != 10 or value[4] != "-" or value[7] != "-":
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def window_ok(value):
+    """Inclusive date range: YYYY-MM-DD/YYYY-MM-DD, start not after end."""
+    if not isinstance(value, str) or value.count("/") != 1:
+        return False
+    start, end = value.split("/")
+    if not ymd_ok(start) or not ymd_ok(end):
+        return False
+    return date.fromisoformat(start) <= date.fromisoformat(end)
 
 
 def load_receipts(path: Path):
@@ -104,11 +148,8 @@ def load_receipts(path: Path):
             if r["id"] in seen:
                 sys.exit(f"error: receipt on line {n} reuses id '{r['id']}' from line {seen[r['id']]}")
             seen[r["id"]] = n
-            if "review_by" in r:
-                try:
-                    date.fromisoformat(r["review_by"])
-                except (TypeError, ValueError):
-                    sys.exit(f"error: receipt on line {n} has review_by {r['review_by']!r}, not an ISO date")
+            if "review_by" in r and not ymd_ok(r["review_by"]):
+                sys.exit(f"error: receipt on line {n} has review_by {r['review_by']!r}, not a YYYY-MM-DD date")
             notes += [f"{r['id']} (line {n}) {note}" for note in v02_notes(r)]
             receipts.append(r)
     return receipts, notes
@@ -150,16 +191,17 @@ def check_receipt(r, base: Path):
     src = r["source"]
     uri = src["uri"]
     if "://" in uri or uri.lower().startswith("urn:"):
-        return UNREADABLE, "remote URI (URL or URN): this checker does not fetch it, so it did not check it"
+        return UNFETCHED, "remote URI (URL or URN): this checker did not fetch it, so it did not check it"
     target = (base / uri).resolve()
     if not target.is_file():
         return "MISSING", f"cannot dereference {uri}"
-    if src.get("canonical"):
-        return UNREADABLE, (f"declared canonical form {src['canonical']!r} is not one this checker "
-                            "can reproduce (it has raw bytes only)")
+    form = src.get("canonical")
+    if form and form != RAW_BYTES:
+        return UNREADABLE, (f"declared canonical form {form!r} is not one this checker "
+                            "can reproduce (it has raw-bytes only)")
     where = uri + (f" lines {src['lines']}" if src.get("lines") else "")
     if "span" in src:
-        where += f" (span {src['span']!r} not applied: no span format in SPEC v0.2; raw bytes hashed)"
+        where += f" (span {src['span']!r} not applied: no span format; ignored, raw bytes hashed)"
     expected = src.get("sha256")
     if expected:
         actual = hashlib.sha256(region_bytes(target, src.get("lines"))).hexdigest()
@@ -174,17 +216,29 @@ def derived_marks(r, today, superseded):
     review_by = r.get("review_by")
     if review_by and r["id"] not in superseded and date.fromisoformat(review_by) < today:
         marks.append(("STALE", f"review_by {review_by} has passed as of {today}; no review recorded"))
-    if "subject" in r and "authorizer" in r and r["subject"] != r["authorizer"]:
+    # kind, not subject, says this is a read (§11).
+    if r.get("kind") == "read" and "subject" in r and "authorizer" in r and r["subject"] != r["authorizer"]:
         witness = r.get("witness")
-        if not witness:
-            marks.append(("UNWITNESSED", "read has no witness (§11.3)"))
+        if not isinstance(witness, str) or not witness:
+            why = "read has no witness (§11.3)" if not witness else "witness is not a party name (§11.3)"
+            marks.append(("UNWITNESSED", why))
         elif witness == r["authorizer"]:
             marks.append(("UNWITNESSED", "the authorizer cannot be the witness (§11.3)"))
         elif witness == r.get("reader"):
             marks.append(("UNWITNESSED", "the reader cannot be the witness (§11.3)"))
         else:
-            notes.append("witness window not checked (no window format in SPEC v0.2)")
+            notes.append("witness window not checked (no witness fixing time in the file)")
     return marks, notes
+
+
+def human_dispute(r):
+    """DISPUTED is reported when a human wrote it. Never computed (§5.1)."""
+    mark = r.get("disputed")
+    if mark is True:
+        return "human mark, not computed"
+    if isinstance(mark, str) and mark.strip():
+        return "human mark, not computed: " + mark.strip()
+    return None
 
 
 def main():
@@ -207,7 +261,8 @@ def main():
     if notes and args.strict:
         sys.exit(f"error: {len(notes)} schema problem(s) under --strict")
     if notes:
-        print("warning: field names are SPEC v0.2 §4.6 suggestions; --strict makes these errors", file=sys.stderr)
+        print("warning: field names are @grok's draft normative names in SPEC v0.2 §4.6, "
+              "not an adopted decision; --strict makes these errors", file=sys.stderr)
 
     pool = receipts if args.all else current
     kind = "" if args.all else "current "
@@ -225,13 +280,17 @@ def main():
     print(f"  {len(receipts)} receipts, {len(superseded)} superseded, sampling {len(pool)}")
     print(f"  sample: {how}")
     print(f"  from: sidecar sha256 {sidecar}")
-    print(f"  checked: {args.today}, by tools/check.py (SPEC v0.2-draft subset; see its header)\n")
+    print(f"  checked: {args.today}, by tools/check.py (SPEC v0.2-draft subset; see its header)")
+    print("  sampling_warrant: this run licenses nothing about receipts it did not read\n")
 
     failures = 0
+    verdicts = []
     for r in pool:
         verdict, detail = check_receipt(r, base)
+        verdicts.append(verdict)
         marks, mark_notes = derived_marks(r, args.today, superseded)
-        if verdict != "OK" or marks:
+        dispute = human_dispute(r)
+        if verdict != "OK" or marks or dispute:
             failures += 1
         tag = " (superseded)" if r["id"] in superseded else ""
         print(f"  [{verdict:^7}] {r['id']}{tag}: {r['claim']}")
@@ -240,8 +299,16 @@ def main():
             print(f"            derivation: {r['derivation']}")
         for mark, why in marks:
             print(f"  [{mark:^7}] {r['id']}: {why}")
+        if dispute:
+            print(f"  [{'DISPUTED':^7}] {r['id']}: {dispute}")
         for note in mark_notes:
             print(f"            note: {note}")
+    if verdicts and all(v in (UNREADABLE, UNFETCHED) for v in verdicts):
+        diagnostic = ("diagnostic: every checked receipt is UNREADABLE or UNFETCHED; "
+                      "this run read no source and is not a pass")
+        print(diagnostic, file=sys.stderr)
+        print(diagnostic)
+        failures += 1
     print()
     print("this check is itself a small report: the receipts above are the ones")
     print("it actually read. semantic support is yours to judge — go look.")
