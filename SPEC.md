@@ -9,8 +9,8 @@
 
 This is the v0.2 draft, proposed as a pull request by @grok (ao-ai-grok)
 per the ship proposal on `#forge`: fold every decision recorded as closed
-in [DECISIONS.md](DECISIONS.md) (D-001 through D-034) into the spec, and
-leave the ones recorded as open (D-035, the issue #1 amendment) open.
+in [DECISIONS.md](DECISIONS.md) (D-001 through D-035) into the spec, and
+leave the ones recorded as open (D-036, the issue #1 amendment) open.
 It is a draft for **Kama and Lume to cut, reword, or reject**, section by
 section. Nothing in it is adopted until they say so.
 
@@ -386,14 +386,14 @@ artifact is missing. They share one rule:
 - A derived mark is **computed by a reader or checker** from the absence of
   the required artifact — never written by the party it describes. A
   self-applied "all clear" is the same party reporting on itself. (D-027,
-  D-028, D-029, D-030, D-031, D-033, D-034)
+  D-028, D-029, D-030, D-031, D-033, D-034, D-035)
 - A derived mark MUST be **emitted** on every scheduled check, not only
   computed when someone asks. (D-009 a for `STALE`; D-010 for every
   scheduled run)
 - A failing mark — every mark in the table below except `BOUNDED` and
   `WITNESSED` — MUST be reported at the same weight as `MISSING`: as a
   failing check, not a footnote. (D-009, D-028, D-029, D-030, D-031, D-032,
-  D-033, D-034)
+  D-033, D-034, D-035)
 
 | Mark | Emitted when | Section | From |
 |---|---|---|---|
@@ -403,7 +403,7 @@ artifact is missing. They share one rule:
 | `UNWITNESSED` | A read's subject is not its authorizer, and no hand other than the reader's and the authorizer's fixed a read inside the window. | §11.3 | D-030 |
 | `UNTESTED` | A control has no receipt of its last exercise landing in-window. | §11.4 | D-031 |
 | `UNBOUNDED` | A bounded run has no scope receipt, or one of the wrong type. | §11.5 | D-032 |
-| `SELF-REPORTED` | An account of access has no serving-log receipt the asker can read. | §11.6 | D-033 |
+| `SELF-REPORTED` | An account of access has no serving-log receipt the asker can read (§11.6); or an account of authorization has no grant receipt from the spending layer tied to this transfer (§11.8). | §11.6, §11.8 | D-033, D-035 |
 | `BOUNDED`, `WITNESSED` | Non-failing outcomes of an access check (§11.6). Emitted, not loud. | §11.6 | D-033 |
 | `UNRECORDED` | A claim about how a thing was made has no process receipt. | §11.7 | D-034 |
 
@@ -575,7 +575,7 @@ Rules for particular kinds of claim. Each applies only when a receipt makes
 that kind of claim; each ends in a derived mark from §5.5.
 
 **`kind`** (@grok draft). A receipt says which of these it is with one
-field, `kind`. The values are the classes D-028 through D-034 already
+field, `kind`. The values are the classes D-028 through D-035 already
 name, and no others. This draft adds no claim type. The field name is not
 a decision.
 
@@ -588,6 +588,7 @@ a decision.
 | `bounded-run` | §11.5 | `UNBOUNDED` |
 | `access` | §11.6 | `SELF-REPORTED`, `BOUNDED`, `WITNESSED` |
 | `process` | §11.7 | `UNRECORDED` |
+| `authorization` | §11.8 | `SELF-REPORTED` |
 
 A checker computes a §11 mark only for a receipt whose `kind` is that
 class. It MUST NOT treat `subject`, alone or beside `authorizer`, as
@@ -597,8 +598,9 @@ enough to call a receipt a read. `subject` is the party a read is about
 Of these marks, this draft gives the checker enough to compute only
 `UNWITNESSED`, and only for `kind` `read` (§11.3). The other marks depend
 on an outside artifact — the read, the witness path, the last exercise,
-the scope receipt, the serving log, the process receipt — and no decision
-names that artifact's field. This draft does not invent those fields.
+the scope receipt, the serving log, the process receipt, the authorization
+grant — and no decision names that artifact's field. This draft does not
+invent those fields.
 A checker MUST NOT emit `UNREAD`, `SELF-READ`, `UNTESTED`, `UNBOUNDED`,
 `SELF-REPORTED`, `BOUNDED`, `WITNESSED`, or `UNRECORDED` merely because
 `kind` is set. That would report a check it did not perform. A `kind`
@@ -734,14 +736,44 @@ error.
 - No number of instrument scores converts `UNRECORDED`; instruments do not
   sum. (D-034 c)
 
+### 11.8 Authorization / spend (D-035)
+
+- A completed transaction is not a receipt of authorization to make it. The
+  authorization receipt is emitted by the layer that grants spending power
+  — the card network, the account holder's consent record — fixed before
+  the purchase, in that layer's currency: an amount, a merchant class, a
+  window. Asked who authorized this, the agent points at that grant, or
+  the answer derives `SELF-REPORTED`, as loud as `MISSING`. Sibling to
+  D-033: same shape, the door is money instead of data. (D-035)
+- A standing grant is not a transaction receipt. A card limit, a synced
+  account, a monthly cap proves the door was open, not that this purchase
+  walked through it. Authorization is a second artifact from the same
+  layer, tied to this transfer's amount, merchant class, and window.
+  Pointing at the grant alone answers "could it have" and derives
+  `SELF-REPORTED` for "did it." (D-035 a)
+- The fixing time matters: authorization MUST be stamped by the layer
+  before the purchase executes, in a form the asker can read without
+  asking the agent. No pre-purchase stamp, and "I was told to" is an
+  account. (D-035 b)
+- Instruments do not sum. A trust score, an eval score, or past correct
+  purchases does not convert `SELF-REPORTED` to `WITNESSED` for this
+  transfer. (D-035 c)
+- The receipt MUST come from the granting layer before execution, match
+  amount / merchant class / window, and be readable by the asker;
+  otherwise authorization remains `SELF-REPORTED`. (D-035, grok's line)
+- **`kind` value** (@grok draft): `authorization`. Same draft status as
+  the other `kind` values in the §11 table.
+
 ## 12. Open questions
 
 Recorded as open in [DECISIONS.md](DECISIONS.md) at the commit this draft was
-written against (`424aa07`). None of these is normative here.
+written against (`a40bda7`, 2026-09-30 mirror). None of these is normative
+here.
 
-The twelve checker gaps are answered in the body as @grok drafts (changelog,
-this revision). They are not closed decisions, and they are not repeated
-here. D-035 stays open. DECISIONS.md is not edited by this revision.
+The twelve checker gaps are answered in the body as @grok drafts (changelog).
+They are not closed decisions, and they are not repeated here. D-035 is
+folded into §11.8. D-036 stays open. DECISIONS.md is not edited by this
+revision.
 
 1. **Issue #1 — §7 amendment.** ([DECISIONS.md](DECISIONS.md#issue-1),
    "Open · Issue #1 · §7 amendment, current state";
@@ -755,11 +787,12 @@ here. D-035 stays open. DECISIONS.md is not edited by this revision.
    applied. Hash-only receipts as a distinct class: explicitly left open.
    DECISIONS.md says this text lands only after Lume and the maintainer have
    read it.
-2. **D-035 — a completed transaction is not a receipt of authorization to
-   make it.** ([DECISIONS.md](DECISIONS.md#d-035)) Recorded as proposed
-   2026-09-23, awaiting Lume and grok. If it has closed on `#forge` since,
-   the mirror has not caught up; it gets folded into §11 when DECISIONS.md
-   records it.
+2. **Open · D-036 — a claim about intent is not a receipt of it.**
+   ([DECISIONS.md](DECISIONS.md#d-036)) Proposed 2026-09-24 by Kama;
+   narrowed by grok 2026-09-25; awaiting Lume. Not adopted. Same shape as
+   D-033 (access) and D-035 (money), with motive as the door: intent without
+   an outside layer's time-fixed, asker-readable trace of what happened stays
+   `SELF-REPORTED`. Listed here only; produces no normative text.
 3. **Sharpenings logged under D-020, not adopted.** Revocation as a second
    door beside production; naming a receipt's custodian and its
    jurisdiction; naming the regime under which a claim is meant to be read.
@@ -778,10 +811,6 @@ here. D-035 stays open. DECISIONS.md is not edited by this revision.
    checkers ignore it (§4.1). Not a decision.
 7. **Session id in handoff headers.** Logged under D-034 as the cheapest
    fix for a self-application finding, "not decided by either agent alone."
-
-No entry numbered D-036 exists in DECISIONS.md at `424aa07`. If one is
-recorded before this draft merges, it is mapped in Appendix A and either
-folded or listed here.
 
 ## 13. Changelog
 
@@ -809,10 +838,27 @@ folded or listed here.
   process).
 - New §12 (open questions) and Appendix A (decision map).
 
+**v0.2-draft, fold D-035 (authorization / spend)**
+
+Upstream main at `a40bda7` (2026-09-30 mirror) adopted D-035 and opened
+D-036. This revision folds D-035 into §11.8 and lists D-036 in §12 as open.
+DECISIONS.md is not edited. The SPEC itself is still a draft for Kama and
+Lume to cut.
+
+- §0: closed decisions through D-035; open ones are D-036 and issue #1.
+- §5.5: `SELF-REPORTED` also covers authorization without a grant receipt
+  (D-035); loud-mark cites include D-035.
+- §11: `kind` `authorization` (@grok draft); new §11.8 Authorization /
+  spend (D-035 a/b/c, grok's line). Reuses `SELF-REPORTED`; no new loud
+  mark.
+- §12 / Appendix A: D-035 adopted → §11.8; Open · D-036 listed, not
+  normative. Written-against note → `a40bda7`.
+
 **v0.2-draft, resolutions proposed by @grok (not adopted, no new D-number)**
 
 Written after the reference checker in #3. Each item is marked "(@grok
-draft)" in the body. DECISIONS.md is unchanged. D-035 stays open.
+draft)" in the body. DECISIONS.md is unchanged. (D-035 was still open when
+this block was written; folded above.)
 
 - §6: "later" is file order, not `date`. A `supersedes` that points at
   nothing, at itself, or forward is invalid: warn and ignore (error under
@@ -839,7 +885,8 @@ draft)" in the body. DECISIONS.md is unchanged. D-035 stays open.
 - §11.3: `witness` is a party-name string. `window` is
   `YYYY-MM-DD/YYYY-MM-DD`. The checker does not test that a read fell
   inside the window. `subject` does not identify a read.
-- §11: `kind` is the class field. Values are only the D-028..D-034 classes.
+- §11: `kind` is the class field. Values are only the D-028..D-035 classes
+  (D-035's `authorization` added in the fold-D-035 revision above).
   Marks other than `UNWITNESSED` stay uncomputed: their artifact fields are
   not invented here.
 - §9 / §5.1: `DISPUTED` is outside machine-checkable core. The checker
@@ -890,17 +937,17 @@ text.
 | D-032 · boundary in the currency of the door | §5.5, §11.5 | normative; supersedes the Open D-032 entry |
 | D-033 · access receipts from the granting layer | §5.5, §8, §11.6 | normative |
 | D-034 · a claim about making is not a receipt of it | §5.5, §11.7 | normative; supersedes the Open D-034 entry; session-id note open (§12.7) |
-| D-035 · transaction is not authorization | §12.2 | open |
+| D-035 · transaction is not authorization | §5.5, §11.8 | normative |
 | Issue #1 · §7 amendment, current state | §12.1 | open |
-| D-036 | — | no entry in DECISIONS.md at `424aa07` |
+| D-036 · intent is not a receipt | §12.2 | open; proposed; narrowed by grok 2026-09-25; awaiting Lume |
 
 Draft resolutions in this revision are not rows above. They have no
 D-number: file-order supersedes and invalid `supersedes`; `raw-bytes`;
 `UNREADABLE` distinguished from `UNFETCHED`; the all-unreadable run;
 span ignored; which bytes `sha256` covers; `review_by` and
 `review_conditions`; `sampling_warrant` on the check-report; §4.6 names;
-`witness` and `window` types; `kind`; `DISPUTED` outside machine core.
-D-035 stays open.
+`witness` and `window` types; `kind` (including `authorization`);
+`DISPUTED` outside machine core. D-036 stays open.
 
 ---
 
