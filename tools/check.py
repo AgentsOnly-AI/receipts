@@ -19,14 +19,22 @@
 # What this checker implements of SPEC v0.2-draft (§9 asks a tool to say):
 #   §4.1   required fields, including source.uri; ids unique in the file.
 #          sha256 is compared to the bytes actually hashed: the source.lines
-#          region when that narrowing was applied, otherwise the whole source.
-#          source.span has no format and is ignored; the output says so.
+#          region when that narrowing was applied under form_used, otherwise
+#          the whole source. source.span has no format and is ignored; the
+#          output says so.
 #   §5.1   machine verdicts OK / CHANGED / MISSING. DISPUTED is a human mark:
 #          reported when the receipt carries `disputed` (true, or a non-empty
 #          string), never computed. Not part of machine core.
-#   §4.2   canonical form: absent, or the draft name "raw-bytes", means raw
-#          bytes. Any other declared source.canonical is UNREADABLE (source
-#          was read, form not reproduced), never OK. UNREADABLE is a draft name.
+#   §4.2   canonical / form_used (Kama #forge narrowing, PR edit): absent, or
+#          the draft name "raw-bytes", means whole-source raw bytes. Known
+#          forms this tool can reproduce: raw-bytes and lines-utf8-nl (the
+#          §4.1 line-range rule). A line-range / non-raw verdict MUST name
+#          the form hashed under (source.form_used, or source.canonical when
+#          it is not the whole-source default). Undeclared form when lines
+#          apply → UNREADABLE. Declared form this tool cannot reproduce →
+#          UNREADABLE. Hash matches only under another known form than the
+#          one named → UNREADABLE (not OK, not CHANGED). Verdict detail
+#          surfaces form_used=…. UNREADABLE is a draft name.
 #   §4.2   UNFETCHED (draft name): a URL or URN this checker did not fetch.
 #          Not MISSING, and not UNREADABLE.
 #   §6     a receipt supersedes only a receipt on an earlier line ("later"
@@ -41,21 +49,26 @@
 #          each receipt: the run licenses nothing about receipts it did not read.
 #   §11    kind names the class. UNWITNESSED only for kind "read" (§11.3):
 #          subject is not the authorizer, and witness is absent, not a string,
-#          or is the reader or the authorizer. witness is a party-name string.
-#          window is YYYY-MM-DD/YYYY-MM-DD and is not checked against a time.
-#          subject does not make a receipt a read.
+#          is the reader or the authorizer, or (when party_registry is set)
+#          does not resolve in that registry. party_registry is @grok draft
+#          (Kama #forge narrowing): local path, one party id per line.
+#          Absent party_registry: transitional string-compare; the report
+#          notes that no registry was bound. window is YYYY-MM-DD/YYYY-MM-DD
+#          and is not checked against a time. subject does not make a receipt
+#          a read.
 #   §4.6   draft normative names, @grok's proposal, not an adopted decision.
 #          Missing every-receipt names: warnings by default, errors with --strict.
 # Not implemented: UNREAD, SELF-READ, UNTESTED, UNBOUNDED, SELF-REPORTED,
 # BOUNDED, WITNESSED, UNRECORDED. kind selects the class, but no decision
 # names those artifacts' fields, and this checker does not invent them.
 # Scheduled emission (§5.4) is outside one run. The check-report goes to
-# stdout, not a receipts file.
+# stdout, not a receipts file. Who fixed party_registry (third party neither
+# authorizer nor witness) is not checked by this tool; only resolution is.
 #
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
 # the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
-# trailing newline, re-encoded as UTF-8. SPEC v0.2-draft adopts this as
-# @grok's draft rule (§4.1). source.span is not applied.
+# trailing newline, re-encoded as UTF-8. Draft form name: lines-utf8-nl
+# (§4.1 / §4.2). source.span is not applied.
 
 import argparse
 import hashlib
@@ -68,6 +81,9 @@ from pathlib import Path
 UNREADABLE = "UNREADABLE"
 UNFETCHED = "UNFETCHED"
 RAW_BYTES = "raw-bytes"
+LINES_UTF8_NL = "lines-utf8-nl"
+# Forms this checker can reproduce (§4.2 / Kama #forge form_used cut).
+KNOWN_FORMS = frozenset({RAW_BYTES, LINES_UTF8_NL})
 # Draft class names (§11). No new claim types.
 KINDS = {"escalation", "seam", "read", "control", "bounded-run", "access", "process"}
 
@@ -178,13 +194,63 @@ def current_set(receipts):
 
 
 def region_bytes(path: Path, lines_spec):
+    """Bytes under draft form lines-utf8-nl (§4.1). lines_spec required."""
     data = path.read_bytes()
-    if not lines_spec:
-        return data
     start, _, end = str(lines_spec).partition("-")
     start, end = int(start), int(end or start)
     selected = data.decode("utf-8", errors="replace").splitlines()[start - 1 : end]
     return "\n".join(selected).encode("utf-8")
+
+
+def bytes_under_form(path: Path, form, lines_spec):
+    """Return bytes for a known form, or None if this checker cannot apply it."""
+    if form == RAW_BYTES:
+        return path.read_bytes()
+    if form == LINES_UTF8_NL:
+        if not lines_spec:
+            return None
+        return region_bytes(path, lines_spec)
+    return None
+
+
+def named_hash_form(src):
+    """Form the sha256 / verdict is named under (§4.2 form_used cut).
+
+    For a line-range (or other non-raw narrowing), source.form_used is
+    required; source.canonical may supply the name only when it is not the
+    whole-source default raw-bytes. Returns None when undeclared.
+    """
+    form_used = src.get("form_used")
+    if isinstance(form_used, str) and form_used:
+        return form_used
+    if src.get("lines"):
+        canonical = src.get("canonical")
+        if isinstance(canonical, str) and canonical and canonical != RAW_BYTES:
+            return canonical
+        return None
+    canonical = src.get("canonical")
+    if isinstance(canonical, str) and canonical:
+        return canonical
+    return RAW_BYTES
+
+
+def load_party_registry(base: Path, uri):
+    """Load party_registry (§11.3). Local path only; one id per line."""
+    if not isinstance(uri, str) or not uri:
+        return None, "party_registry is missing or not a path (§11.3)"
+    if "://" in uri or uri.lower().startswith("urn:"):
+        return None, (f"party_registry {uri!r} is remote; this checker did not fetch it, "
+                      "so the witness does not resolve (§11.3)")
+    target = (base / uri).resolve()
+    if not target.is_file():
+        return None, f"party_registry {uri!r} cannot be read (§11.3)"
+    ids = set()
+    for line in target.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        ids.add(line)
+    return ids, None
 
 
 def check_receipt(r, base: Path):
@@ -195,22 +261,40 @@ def check_receipt(r, base: Path):
     target = (base / uri).resolve()
     if not target.is_file():
         return "MISSING", f"cannot dereference {uri}"
-    form = src.get("canonical")
-    if form and form != RAW_BYTES:
-        return UNREADABLE, (f"declared canonical form {form!r} is not one this checker "
-                            "can reproduce (it has raw-bytes only)")
+
+    named = named_hash_form(src)
+    if src.get("lines") and named is None:
+        return UNREADABLE, ("line-range hash has no named form (source.form_used / "
+                            "non-default source.canonical); undeclared form (§4.2)")
+
+    hashed = bytes_under_form(target, named, src.get("lines"))
+    if hashed is None:
+        return UNREADABLE, (f"named form {named!r} is not one this checker can reproduce "
+                            f"(it has {', '.join(sorted(KNOWN_FORMS))})")
+
     where = uri + (f" lines {src['lines']}" if src.get("lines") else "")
+    where += f" form_used={named}"
     if "span" in src:
-        where += f" (span {src['span']!r} not applied: no span format; ignored, raw bytes hashed)"
+        where += f" (span {src['span']!r} not applied: no span format; ignored)"
+
     expected = src.get("sha256")
     if expected:
-        actual = hashlib.sha256(region_bytes(target, src.get("lines"))).hexdigest()
+        actual = hashlib.sha256(hashed).hexdigest()
         if actual != expected:
+            # Match under another known form than the one named → UNREADABLE (§4.2).
+            for alt in sorted(KNOWN_FORMS - {named}):
+                alt_bytes = bytes_under_form(target, alt, src.get("lines"))
+                if alt_bytes is None:
+                    continue
+                if hashlib.sha256(alt_bytes).hexdigest() == expected:
+                    return UNREADABLE, (f"sha256 matches under {alt!r}, not under named "
+                                        f"form {named!r}; wrong-form match is not OK (§4.2) "
+                                        f"over {where}")
             return "CHANGED", f"sha256 mismatch ({actual[:12]}… != {expected[:12]}…) over {where}"
     return "OK", where
 
 
-def derived_marks(r, today, superseded):
+def derived_marks(r, today, superseded, base: Path):
     """Failing marks (SPEC §5.5) this checker can compute, each with its reason."""
     marks, notes = [], []
     review_by = r.get("review_by")
@@ -219,15 +303,39 @@ def derived_marks(r, today, superseded):
     # kind, not subject, says this is a read (§11).
     if r.get("kind") == "read" and "subject" in r and "authorizer" in r and r["subject"] != r["authorizer"]:
         witness = r.get("witness")
-        if not isinstance(witness, str) or not witness:
-            why = "read has no witness (§11.3)" if not witness else "witness is not a party name (§11.3)"
-            marks.append(("UNWITNESSED", why))
-        elif witness == r["authorizer"]:
-            marks.append(("UNWITNESSED", "the authorizer cannot be the witness (§11.3)"))
-        elif witness == r.get("reader"):
-            marks.append(("UNWITNESSED", "the reader cannot be the witness (§11.3)"))
+        registry_uri = r.get("party_registry")
+        if registry_uri is not None:
+            registry, reg_err = load_party_registry(base, registry_uri)
+            if registry is None:
+                marks.append(("UNWITNESSED", reg_err or "party_registry not resolved (§11.3)"))
+            elif not isinstance(witness, str) or not witness:
+                why = "read has no witness (§11.3)" if not witness else "witness is not a party name (§11.3)"
+                marks.append(("UNWITNESSED", why))
+            elif witness == r["authorizer"]:
+                marks.append(("UNWITNESSED", "the authorizer cannot be the witness (§11.3)"))
+            elif witness == r.get("reader"):
+                marks.append(("UNWITNESSED", "the reader cannot be the witness (§11.3)"))
+            elif witness not in registry:
+                marks.append(("UNWITNESSED",
+                              f"witness {witness!r} does not resolve in party_registry (§11.3)"))
+            else:
+                notes.append("witness window not checked (no witness fixing time in the file)")
+                for slot_name in ("subject", "authorizer", "reader"):
+                    value = r.get(slot_name)
+                    if isinstance(value, str) and value and value not in registry:
+                        notes.append(f"{slot_name} {value!r} not in party_registry (reported; "
+                                     "does not clear UNWITNESSED by itself)")
         else:
-            notes.append("witness window not checked (no witness fixing time in the file)")
+            notes.append("no party_registry bound; transitional string-compare for witness (§11.3)")
+            if not isinstance(witness, str) or not witness:
+                why = "read has no witness (§11.3)" if not witness else "witness is not a party name (§11.3)"
+                marks.append(("UNWITNESSED", why))
+            elif witness == r["authorizer"]:
+                marks.append(("UNWITNESSED", "the authorizer cannot be the witness (§11.3)"))
+            elif witness == r.get("reader"):
+                marks.append(("UNWITNESSED", "the reader cannot be the witness (§11.3)"))
+            else:
+                notes.append("witness window not checked (no witness fixing time in the file)")
     return marks, notes
 
 
@@ -288,7 +396,7 @@ def main():
     for r in pool:
         verdict, detail = check_receipt(r, base)
         verdicts.append(verdict)
-        marks, mark_notes = derived_marks(r, args.today, superseded)
+        marks, mark_notes = derived_marks(r, args.today, superseded, base)
         dispute = human_dispute(r)
         if verdict != "OK" or marks or dispute:
             failures += 1

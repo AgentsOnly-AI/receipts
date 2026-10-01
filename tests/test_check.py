@@ -68,6 +68,7 @@ class Gap1Canonical(unittest.TestCase):
         p = run([receipt("r-1", sha256=sha(RAW), canonical="nfc-text")])
         self.assertIn("[UNREADABLE] r-1", p.stdout)
         self.assertIn("'nfc-text'", p.stdout)
+        self.assertIn("not one this checker can reproduce", p.stdout)
         self.assertEqual(p.returncode, 1)
 
     def test_absent_canonical_means_raw_bytes(self):
@@ -92,13 +93,43 @@ class Gap1Canonical(unittest.TestCase):
 
 class Gap2LineRangeHashing(unittest.TestCase):
     def test_lines_hash_joined_with_newline_no_trailing_newline(self):
-        p = run([receipt("r-1", lines="2-3", sha256=sha(b"line two\nline three"))])
+        p = run([receipt("r-1", lines="2-3", form_used="lines-utf8-nl",
+                         sha256=sha(b"line two\nline three"))])
         self.assertIn("[  OK   ] r-1", p.stdout)
         self.assertIn("raw.txt lines 2-3", p.stdout)
+        self.assertIn("form_used=lines-utf8-nl", p.stdout)
 
     def test_trailing_newline_is_not_part_of_the_region(self):
-        p = run([receipt("r-1", lines="2-3", sha256=sha(b"line two\nline three\n"))])
+        p = run([receipt("r-1", lines="2-3", form_used="lines-utf8-nl",
+                         sha256=sha(b"line two\nline three\n"))])
         self.assertIn("[CHANGED] r-1", p.stdout)
+
+    def test_line_range_without_named_form_is_unreadable(self):
+        p = run([receipt("r-1", lines="2-3", sha256=sha(b"line two\nline three"))])
+        self.assertIn("[UNREADABLE] r-1", p.stdout)
+        self.assertIn("undeclared form", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_canonical_may_supply_form_used_when_not_raw_bytes(self):
+        p = run([receipt("r-1", lines="2-3", canonical="lines-utf8-nl",
+                         sha256=sha(b"line two\nline three"))])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertIn("form_used=lines-utf8-nl", p.stdout)
+
+    def test_hash_matching_only_under_another_form_is_unreadable(self):
+        # Named raw-bytes (whole file) but sha256 is the line-range digest.
+        p = run([receipt("r-1", lines="2-3", form_used="raw-bytes",
+                         sha256=sha(b"line two\nline three"))])
+        self.assertIn("[UNREADABLE] r-1", p.stdout)
+        self.assertIn("matches under 'lines-utf8-nl'", p.stdout)
+        self.assertIn("wrong-form match is not OK", p.stdout)
+        self.assertNotIn("[CHANGED]", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_whole_file_ok_surfaces_form_used_raw_bytes(self):
+        p = run([receipt("r-1", sha256=sha(RAW))])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertIn("form_used=raw-bytes", p.stdout)
 
 
 class Gap3Span(unittest.TestCase):
@@ -244,6 +275,7 @@ class Gap9DerivedMarks(unittest.TestCase):
     def test_unwitnessed_when_witness_absent(self):
         p = run([self.read()])
         self.assertIn("[UNWITNESSED] r-1: read has no witness", p.stdout)
+        self.assertIn("no party_registry bound; transitional string-compare", p.stdout)
         self.assertEqual(p.returncode, 1)
 
     def test_authorizer_cannot_be_witness(self):
@@ -254,6 +286,7 @@ class Gap9DerivedMarks(unittest.TestCase):
         p = run([self.read(witness="w-hand")])
         self.assertNotIn("UNWITNESSED", p.stdout)
         self.assertIn("witness window not checked", p.stdout)
+        self.assertIn("no party_registry bound; transitional string-compare", p.stdout)
         self.assertEqual(p.returncode, 0)
 
     def test_subject_who_authorized_needs_no_witness(self):
@@ -263,6 +296,58 @@ class Gap9DerivedMarks(unittest.TestCase):
     def test_report_says_what_it_implements(self):
         p = run([receipt("r-1")])
         self.assertIn("SPEC v0.2-draft subset", p.stdout)
+
+
+class RegistryBoundWitness(unittest.TestCase):
+    """Kama #forge narrowing: witness must resolve in party_registry (§11.3)."""
+
+    def read(self, **kw):
+        return {**receipt("r-1"), "kind": "read", "subject": "s", "authorizer": "a",
+                "reader": "r", "window": "2026-09-01/2026-09-30",
+                "party_registry": "guests.txt", **kw}
+
+    def run_with_registry(self, receipts, guests, *args):
+        import tempfile, subprocess, sys, json
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "raw.txt").write_bytes(RAW)
+            (Path(d) / "guests.txt").write_text(guests)
+            sidecar = Path(d) / "report.md.receipts.jsonl"
+            sidecar.write_text("".join(json.dumps(r) + "\n" for r in receipts))
+            return subprocess.run(
+                [sys.executable, str(CHECK), str(sidecar), "--today", "2026-09-27", *args],
+                capture_output=True, text=True)
+
+    def test_witness_in_registry_is_not_unwitnessed(self):
+        p = self.run_with_registry(
+            [self.read(witness="w-hand")],
+            "# guest list\ns\na\nr\nw-hand\n")
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertIn("witness window not checked", p.stdout)
+        self.assertNotIn("transitional string-compare", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_witness_missing_from_registry_is_unwitnessed(self):
+        p = self.run_with_registry(
+            [self.read(witness="stranger")],
+            "s\na\nr\nw-hand\n")
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("does not resolve in party_registry", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_unreadable_registry_is_unwitnessed(self):
+        p = run([self.read(witness="w-hand", party_registry="missing-guests.txt")])
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("cannot be read", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_other_slot_not_in_registry_is_noted_not_a_clear(self):
+        p = self.run_with_registry(
+            [self.read(witness="w-hand", subject="not-on-list")],
+            "a\nr\nw-hand\n")
+        self.assertNotIn("[UNWITNESSED]", p.stdout)
+        self.assertIn("subject 'not-on-list' not in party_registry", p.stdout)
+        self.assertEqual(p.returncode, 0)
 
 
 class Gap10NewRequiredFields(unittest.TestCase):
