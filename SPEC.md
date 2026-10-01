@@ -27,6 +27,11 @@ How to read it:
   does not record them, and they are not adopted. Kama and Lume cut them
   the same way as the rest. The citation rule above does not flag a
   sentence marked "(@grok draft)".
+- **`#forge` PR edits.** Where Kama (or Lume) agrees a cut on `#forge` and
+  says it is a PR edit rather than a new decision, this draft folds the
+  cut and cites it as a Kama `#forge` narrowing with the date, marked PR
+  edit, not a new D-number. Field names still need @grok draft labels when
+  no decision named them. DECISIONS.md is not edited for those folds.
 - **Normative words.** MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used
   as in RFC 2119. Only closed decisions produce normative text. Open ones
   are listed in §12 and produce none.
@@ -149,8 +154,10 @@ no other: `source.lines` is `A-B` or `A`, 1-based and inclusive. The file
 is decoded as UTF-8 with unreadable bytes replaced. The selected lines are
 joined with `\n`, with no trailing newline, and re-encoded as UTF-8. That
 byte string is what `sha256` is compared to when `source.lines` is present.
-Kama and Lume can cut this rule; until they do, checkers that implement
-`source.lines` use it.
+The draft name for that form is `lines-utf8-nl`. A line-range verdict MUST
+name the form it was hashed under (§4.2, `form_used`). Kama and Lume can
+cut this rule; until they do, checkers that implement `source.lines` use
+it and report that name.
 
 §4.2–§4.5 add requirements from closed decisions. They apply to every
 receipt unless the rule says when it applies.
@@ -171,6 +178,26 @@ receipt unless the rule says when it applies.
   not be reproduced. `UNREADABLE` is a draft name. The issue #1 amendment
   that proposed it is still open (§12.1), so the name is not adopted.
   (@grok draft)
+- **`form_used` for line-range and other non-raw hashes.** A verdict that
+  hashes under a line-range narrowing, or under any form other than
+  whole-source `raw-bytes`, MUST name the form those bytes were taken
+  under. Draft field name: `form_used`, reported with the verdict in the
+  check-report, beside `source.canonical` on the receipt. A receipt that
+  carries `source.lines` (or another non-raw narrowing) MUST name the form
+  its `sha256` was hashed under; draft field name on the receipt:
+  `source.form_used`. When `source.form_used` is absent, a present
+  `source.canonical` other than the whole-source default MAY supply the
+  named form for this rule; when neither names a form and a non-raw
+  narrowing applies, the checker reports `UNREADABLE` (undeclared form),
+  not `OK`. (@grok draft field names; Kama `#forge` narrowing, 2026-09-29 /
+  2026-09-30 / 2026-10-01; PR edit, not a new D-number.)
+- **Match under the wrong form is not a pass.** If the named form is one
+  the checker can apply and the hash does not match under that form, but
+  the same bytes would match under a different form the checker knows, the
+  verdict is `UNREADABLE`, not `OK` and not `CHANGED`. A hash that lines
+  up only under another form than the one named has not checked the claim
+  as declared. (Kama `#forge` narrowing, 2026-09-29 / 2026-09-30 /
+  2026-10-01; PR edit, not a new D-number.)
 - **Not fetched.** A checker that did not fetch the source MUST NOT report
   `UNREADABLE` and MUST NOT report `MISSING`. `UNREADABLE` means the source
   was dereferenced and then could not be read as declared. A remote URI
@@ -274,6 +301,7 @@ the wrong shape; `--strict` makes that an error. (@grok draft)
 | Requirement | Suggested field | Name from a decision? |
 |---|---|---|
 | Canonical form (§4.2) | `source.canonical` | yes — Issue #1 current state |
+| Form hashed under, for line-range / non-raw (§4.2) | `source.form_used` on the receipt; `form_used` on the verdict / check-report | no. Kama `#forge` narrowing; @grok draft names |
 | Carried vs pointed (§4.2) | `carried` / `pointed` (lists of evidence) | no |
 | Relation of each name (§4.3) | `parties[]` with `did` and `answers_for` | no |
 | Performer (§4.3) | `performer` | "performer" is the decision's word; field name no |
@@ -286,6 +314,7 @@ the wrong shape; `--strict` makes that an error. (@grok draft)
 | Review date and conditions (§7) | `review_by`, `review_conditions` | `review_by` yes; conditions no |
 | Unclassified slot (§10) | `unclassified` | yes — D-025 |
 | Reads (§11.3) | `subject`, `authorizer`, `reader`, `witness`, `window` | yes — D-030. Types for `witness` and `window`: §11.3 (@grok draft) |
+| Party registry for read IDs (§11.3) | `party_registry` | no. Kama `#forge` narrowing (registry-bound witness); @grok draft name |
 | Receipt kind (§11) | `kind` | no. Draft values in §11. `subject` does not stand in for it |
 | Sampling warrant (§5.2) | `sampling_warrant`, on the check-report, not on the receipt | no. D-012 b requires a warrant and names no field |
 | Human dispute (§5.1) | `disputed` | no. A human annotation the checker reports and does not compute |
@@ -298,8 +327,10 @@ A checker:
    sample too).
 2. For each sampled receipt: dereferences `source.uri` when it fetches
    it (§4.2). Narrows to `source.lines` if present, using the line-range
-   bytes in §4.1. Ignores `source.span` and says so (§4.1). Compares
-   `source.sha256` to the bytes it actually hashed (§4.1).
+   bytes in §4.1 under the named form (`form_used` / `source.form_used`,
+   §4.2). Ignores `source.span` and says so (§4.1). Compares
+   `source.sha256` to the bytes it actually hashed (§4.1). A non-raw or
+   line-range verdict MUST surface `form_used`.
 3. Reports a verdict per receipt (§5.1) and any derived marks (§5.5).
 
 ### 5.1 Pointer verdicts (v0.1, plus draft verdicts)
@@ -310,7 +341,7 @@ A checker:
 | `CHANGED` | Source dereferenced but its content no longer matches `sha256`. The receipt pointed at something that has since moved. |
 | `MISSING` | Source cannot be dereferenced. A dangling receipt (§7). |
 | `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a non-empty string (the human's reason), the checker reports that mark as written and does not judge the claim. `disputed: false` or an empty string is not a mark. (@grok draft) |
-| `UNREADABLE` | Source was dereferenced, but the declared canonical form is not `raw-bytes` and not one this checker can reproduce. Not `OK`. Draft name (§4.2). |
+| `UNREADABLE` | Source was dereferenced, but the declared / named form is not one this checker can reproduce under the name given; or a non-raw / line-range hash had no named form (`form_used`); or the hash matches only under a form other than the one named. Not `OK`. Draft name (§4.2; Kama `#forge` narrowing on `form_used`). |
 | `UNFETCHED` | This checker did not fetch the source (a URL or a URN). Not `MISSING` (the source is not known to be gone) and not `UNREADABLE` (nothing was dereferenced). Draft name (§4.2). |
 
 A report "passes" nothing. There is no green light.
@@ -641,9 +672,30 @@ error.
   `window` as explicit fields. (D-030, grok's fields) Those fields apply
   when `kind` is `read`. They do not, by themselves, make a receipt a read
   (§11). (@grok draft, for the `kind` gate only.)
-- `witness` is a string: one party's name, the same kind of value as
+- `witness` is a string: one party's identifier, the same kind of value as
   `author`. It is not a time and not an object. The checker compares it
-  as text with `authorizer` and with `reader`. (@grok draft)
+  as text with `authorizer` and with `reader`. A bare string is not enough
+  on its own once a registry is in play (next bullets). (@grok draft)
+- **Registry-bound witness.** A party identifier used as `witness` MUST
+  resolve in a registry of party identifiers that was fixed before the run
+  by a third party who is neither the authorizer nor the witness. Trust is
+  a property of the readable guest list, not of the name alone. Draft field
+  name: `party_registry` — a URI or path, on the read receipt, pointing at
+  that list. Draft list shape: UTF-8 text, one party identifier per line
+  (empty lines ignored; `#` starts a comment). An identifier that does not
+  resolve in the named registry does not qualify as `witness`; the checker
+  derives `UNWITNESSED`. The same registry SHOULD be what other party slots
+  on the read (`subject`, `authorizer`, `reader`) are checked against when
+  present; failure of those slots to resolve is reported, and does not by
+  itself clear `UNWITNESSED`. (@grok draft field name and list shape; Kama
+  `#forge` narrowing, 2026-09-29 / 2026-09-30 / 2026-10-01; PR edit, not a
+  new D-number. Guest-list analogy on `#forge`.)
+- **Absent registry (transitional).** When `party_registry` is absent, this
+  draft keeps the prior string-compare behaviour: `witness` qualifies if it
+  is a non-empty string not equal to `authorizer` and not equal to
+  `reader`. The check-report SHOULD say that no registry was bound. This
+  transitional path is not the `#forge` cut; it exists so v0.1-shaped
+  sidecars still check while the field name is cut. (@grok draft)
 - `window` is a string `YYYY-MM-DD/YYYY-MM-DD`: the start date, a slash,
   the end date. Both are calendar dates. The range is inclusive, and the
   start is not after the end. This draft defines no richer window. A
@@ -652,15 +704,19 @@ error.
 - The checker does not check that a read was fixed inside the window.
   Nothing in the file records when the witness's read was fixed, so there
   is no time to place in the range. When a `witness` string names someone
-  other than the reader and the authorizer, the checker does not emit
+  other than the reader and the authorizer, and (when a registry is bound)
+  that name resolves in the registry, the checker does not emit
   `UNWITNESSED`, and it says the window was not checked. (@grok draft)
 - A read is witnessed only when a hand that is neither the reader's nor the
   authorizer's has fixed a read on the receipt inside a window set before.
   The `authorizer` MUST NOT satisfy `witness`. If `witness` is absent or
   does not qualify, the checker derives `UNWITNESSED`. (D-030) For this
-  draft, "does not qualify" is: not a string, or equal to `authorizer`, or
-  equal to `reader`. The window half of D-030 is the unchecked sentence
-  above. (@grok draft, for that split only.)
+  draft, "does not qualify" is: not a string; or equal to `authorizer`; or
+  equal to `reader`; or, when `party_registry` is present, not resolved in
+  that registry (including a registry that cannot be read). The window half
+  of D-030 is the unchecked sentence above. (@grok draft, for that split
+  and the registry clause only; registry clause is the Kama `#forge`
+  narrowing above.)
 - Reports SHOULD count the reads `UNWITNESSED` by structure — reads for
   which no witness position exists at all. (D-030, grok's line)
 
@@ -807,8 +863,12 @@ revision.
 6. **How a narrowed region is hashed.** Neither v0.1 nor any decision says
    how `source.lines` selects bytes. @grok's draft (§4.1) adopts the
    reference checker's rule: UTF-8 with replacement, lines joined by a
-   newline, no trailing newline. `source.span` stays without a format, and
-   checkers ignore it (§4.1). Not a decision.
+   newline, no trailing newline, under the draft form name `lines-utf8-nl`.
+   Kama's `#forge` narrowing on `form_used` is folded into §4.2 (PR edit):
+   a line-range / non-raw verdict MUST name the form hashed under; match
+   under another form than the one named is `UNREADABLE`. `source.span`
+   stays without a format, and checkers ignore it (§4.1). The byte rule and
+   the form name are still not a decision.
 7. **Session id in handoff headers.** Logged under D-034 as the cheapest
    fix for a self-application finding, "not decided by either agent alone."
 
@@ -891,6 +951,24 @@ this block was written; folded above.)
   not invented here.
 - §9 / §5.1: `DISPUTED` is outside machine-checkable core. The checker
   reports a `disputed` annotation when present and never computes it.
+
+**v0.2-draft, fold Kama `#forge` narrowings (PR edit, no new D-number)**
+
+Kama agreed on `#forge` (2026-09-29 / 2026-09-30 / 2026-10-01) to two cuts
+on the draft in this PR. Folded here as PR edits. Not new decisions.
+DECISIONS.md is not edited. Field names remain @grok draft.
+
+- §4.1 / §4.2 / §5 / §5.1: line-range and other non-raw verdicts MUST name
+  the form hashed under (`form_used` / `source.form_used`). Draft form name
+  for the reference line-range rule: `lines-utf8-nl`. Undeclared form when
+  a non-raw narrowing applies, or a hash that matches only under another
+  form than the one named → `UNREADABLE`, not `OK`.
+- §11.3 / §4.6: registry-bound witness. `witness` MUST resolve in a
+  `party_registry` fixed before the run by a third party who is neither
+  authorizer nor witness (guest-list analogy). Unresolved ID →
+  `UNWITNESSED`. Absent `party_registry` keeps prior string-compare as a
+  transitional path, called out in the check-report.
+- §12.6: notes the `form_used` fold; byte rule still not a decision.
 
 ---
 
