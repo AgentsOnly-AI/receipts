@@ -413,6 +413,129 @@ class KindAndDispute(unittest.TestCase):
         self.assertIn("sampling_warrant: this run licenses nothing about receipts it did not read", p.stdout)
 
 
+class KindsFromLaterFolds(unittest.TestCase):
+    def test_authorization_and_intent_are_classes(self):
+        for kind in ("authorization", "intent"):
+            p = run([{**receipt("r-1", sha256=sha(RAW)), "kind": kind}], "--strict")
+            self.assertEqual(p.stderr, "", kind)
+            self.assertEqual(p.returncode, 0, kind)
+
+    def test_intent_kind_computes_no_mark(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "kind": "intent"}])
+        self.assertNotIn("CLAIMED", p.stdout)
+        self.assertNotIn("UNWITNESSED", p.stdout)
+
+
+DECISIONS = """# DECISIONS
+
+## D-001 · 2026-08-07 · Process
+
+- **Source:** #forge, 2026-08-07, @a
+- **Author:** A
+
+## D-002 · 2026-08-08 · A rule
+
+- **Source:** #forge, 2026-08-08 (@a, proposal);
+  2026-08-09 (@b, cut)
+- **Author:** A
+
+## Open · D-003 · Not yet
+
+- **Source:** #forge, 2026-08-10 (@a)
+"""
+
+SPEC = """# spec
+
+## 0. About
+
+Mentions D-009 here, which is outside the fold region.
+
+## 1. Rules
+
+- A rule. (D-002 b)
+
+## 12. Open questions
+
+1. D-003 is open.
+
+## Appendix A
+
+### Dropped
+
+- D-001 — process only.
+
+## Appendix B. Fold sources
+
+- **D-001** — #forge, 2026-08-07, @a
+- **D-002** — #forge, 2026-08-08 (@a, proposal); 2026-08-09 (@b, cut)
+"""
+
+
+class Coverage(unittest.TestCase):
+    """SPEC §0 fold source: closed D-numbers cited or dropped, both ways."""
+
+    def cover(self, spec=SPEC, decisions=DECISIONS):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "SPEC.md").write_text(spec)
+            (Path(d) / "DECISIONS.md").write_text(decisions)
+            return subprocess.run([sys.executable, str(CHECK), "--coverage",
+                                   str(Path(d) / "SPEC.md"), str(Path(d) / "DECISIONS.md")],
+                                  capture_output=True, text=True)
+
+    def test_repo_spec_covers_repo_decisions(self):
+        p = subprocess.run([sys.executable, str(CHECK), "--coverage",
+                            str(ROOT / "SPEC.md"), str(ROOT / "DECISIONS.md")],
+                           capture_output=True, text=True)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_complete_fixture_has_no_gap(self):
+        p = self.cover()
+        self.assertIn("closed in DECISIONS.md: 2", p.stdout)
+        self.assertIn("cited in SPEC §1–§11: 1; dropped: 1", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_closed_but_neither_cited_nor_dropped_is_missing(self):
+        p = self.cover(spec=SPEC.replace("- D-001 — process only.\n", ""))
+        self.assertIn("[MISSING] D-001: closed in DECISIONS.md; not cited", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_cited_but_not_closed_is_reported_with_its_line(self):
+        p = self.cover(spec=SPEC.replace("(D-002 b)", "(D-002 b, D-003)"))
+        self.assertIn("[NOT CLOSED] D-003: cited in SPEC line 9; not closed", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_open_questions_and_section_0_are_not_folds(self):
+        p = self.cover()
+        self.assertNotIn("D-003", p.stdout)
+        self.assertNotIn("D-009", p.stdout)
+
+    def test_dropped_but_not_closed(self):
+        p = self.cover(spec=SPEC.replace("- D-001 — process only.", "- D-001 — process only.\n- D-007 — gone."))
+        self.assertIn("[NOT CLOSED] D-007: listed as dropped", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_dropped_and_cited_is_both(self):
+        p = self.cover(spec=SPEC.replace("(D-002 b)", "(D-002 b; D-001)"))
+        self.assertIn("[BOTH] D-001: listed as dropped and also cited", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_fold_source_must_match_decisions(self):
+        p = self.cover(spec=SPEC.replace("(@b, cut)", "(@b, close)"))
+        self.assertIn("[SOURCE DRIFT] D-002", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_missing_fold_source_line(self):
+        p = self.cover(spec=SPEC.replace("- **D-001** — #forge, 2026-08-07, @a\n", ""))
+        self.assertIn("[NO SOURCE] D-001: no Appendix B fold-source line", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_receipts_file_required_without_coverage(self):
+        p = subprocess.run([sys.executable, str(CHECK)], capture_output=True, text=True)
+        self.assertIn("a receipts file is required unless --coverage is given", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@
 # Usage:
 #   python3 check.py <report>.receipts.jsonl [--sample N] [--seed S] [--all]
 #                                            [--today YYYY-MM-DD] [--strict]
+#   python3 check.py --coverage SPEC.md DECISIONS.md
 #
 # Verdicts per receipt: OK | CHANGED | MISSING | UNREADABLE | UNFETCHED
 # (superseded receipts are resolved first; only the current set is sampled
@@ -59,11 +60,22 @@
 #   §4.6   draft normative names, @grok's proposal, not an adopted decision.
 #          Missing every-receipt names: warnings by default, errors with --strict.
 # Not implemented: UNREAD, SELF-READ, UNTESTED, UNBOUNDED, SELF-REPORTED,
-# BOUNDED, WITNESSED, UNRECORDED. kind selects the class, but no decision
-# names those artifacts' fields, and this checker does not invent them.
+# BOUNDED, WITNESSED, UNRECORDED, CLAIMED, and the §11.9 (intent)
+# UNWITNESSED. kind selects the class (authorization and intent included),
+# but no decision names those artifacts' fields, and this checker does not
+# invent them.
 # Scheduled emission (§5.4) is outside one run. The check-report goes to
 # stdout, not a receipts file. Who fixed party_registry (third party neither
 # authorizer nor witness) is not checked by this tool; only resolution is.
+#
+# Coverage (--coverage, SPEC §0 "Fold source"; Lume and Kama #forge cuts,
+# conventions of the draft, not D-numbers): a D-number is closed when
+# DECISIONS.md heads it "## D-0NN ·" (open entries are "## Open ·"). Every
+# closed D-number must be cited in SPEC §1–§11 (from "## 1." up to the
+# "Open questions" section) or listed under "### Dropped"; every D-number
+# cited there or dropped must be closed; none may be both. Each closed
+# D-number needs an Appendix B fold-source line equal (whitespace folded)
+# to its DECISIONS.md **Source:** line. Exit 0 iff no gap.
 #
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
 # the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
@@ -74,6 +86,7 @@ import argparse
 import hashlib
 import json
 import random
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -85,7 +98,8 @@ LINES_UTF8_NL = "lines-utf8-nl"
 # Forms this checker can reproduce (§4.2 / Kama #forge form_used cut).
 KNOWN_FORMS = frozenset({RAW_BYTES, LINES_UTF8_NL})
 # Draft class names (§11). No new claim types.
-KINDS = {"escalation", "seam", "read", "control", "bounded-run", "access", "process"}
+KINDS = {"escalation", "seam", "read", "control", "bounded-run", "access", "process",
+         "authorization", "intent"}
 
 # Fields SPEC v0.2 requires of every receipt. Names are §4.6 draft normative
 # names (@grok's proposal, not an adopted decision).
@@ -116,8 +130,7 @@ def v02_notes(r):
     if "review_by" in r and "review_conditions" not in r:
         notes.append("review_by has no review_conditions beside it (§7)")
     if "kind" in r and r["kind"] not in KINDS:
-        notes.append("kind is not one of the §11 classes (escalation, seam, read, "
-                     "control, bounded-run, access, process)")
+        notes.append("kind is not one of the §11 classes (" + ", ".join(sorted(KINDS)) + ")")
     if "window" in r and not window_ok(r["window"]):
         notes.append("window must be YYYY-MM-DD/YYYY-MM-DD (§11.3)")
     return notes
@@ -339,6 +352,94 @@ def derived_marks(r, today, superseded, base: Path):
     return marks, notes
 
 
+D_NUM = re.compile(r"\bD-\d{3}\b")
+
+
+def closed_decisions(text):
+    """Closed D-numbers and their **Source:** lines (whitespace folded)."""
+    closed = {}
+    for sec in re.split(r"(?m)^## ", text):
+        m = re.match(r"(D-\d{3}) ·", sec)
+        if not m:
+            continue
+        src = re.search(r"^- \*\*Source:\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", sec, re.S | re.M)
+        closed[m.group(1)] = " ".join(src.group(1).split()) if src else None
+    return closed
+
+
+def spec_folds(text):
+    """(cited in §1–§11 with first line, dropped, Appendix B sources)."""
+    lines = text.splitlines()
+    try:
+        start = next(i for i, l in enumerate(lines) if l.startswith("## 1. "))
+        end = next(i for i, l in enumerate(lines) if re.match(r"## \d+\. Open questions", l))
+    except StopIteration:
+        sys.exit("error: SPEC has no '## 1.' heading or no '## N. Open questions' heading")
+    cited = {}
+    for n in range(start, end):
+        for d in D_NUM.findall(lines[n]):
+            cited.setdefault(d, n + 1)
+    dropped, sources, section = set(), {}, None
+    for line in lines[end:]:
+        if line.startswith("#"):
+            section = "dropped" if re.match(r"#+ Dropped\b", line) else (
+                "sources" if re.match(r"#+ Appendix B\b", line) else None)
+            continue
+        if section == "dropped":
+            m = re.match(r"- \**(D-\d{3})\b", line)
+            if m:
+                dropped.add(m.group(1))
+        elif section == "sources":
+            m = re.match(r"- \*\*(D-\d{3})\*\* — (.*)$", line)
+            if m:
+                sources[m.group(1)] = " ".join(m.group(2).split())
+    return cited, dropped, sources
+
+
+def coverage(spec: Path, decisions: Path):
+    """Bidirectional coverage of closed D-numbers (SPEC §0). Returns gap lines."""
+    closed = closed_decisions(decisions.read_text(encoding="utf-8"))
+    cited, dropped, sources = spec_folds(spec.read_text(encoding="utf-8"))
+    gaps = []
+    for d in sorted(closed):
+        if d not in cited and d not in dropped:
+            gaps.append(("MISSING", d, "closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped"))
+        if d in cited and d in dropped:
+            gaps.append(("BOTH", d, f"listed as dropped and also cited (SPEC line {cited[d]})"))
+        if d not in sources:
+            gaps.append(("NO SOURCE", d, "no Appendix B fold-source line"))
+        elif closed[d] is None:
+            gaps.append(("NO SOURCE", d, "DECISIONS.md entry has no **Source:** line"))
+        elif sources[d] != closed[d]:
+            gaps.append(("SOURCE DRIFT", d, "Appendix B line differs from the DECISIONS.md **Source:** line"))
+    for d in sorted(set(cited) - set(closed)):
+        gaps.append(("NOT CLOSED", d, f"cited in SPEC line {cited[d]}; not closed in DECISIONS.md"))
+    for d in sorted(dropped - set(closed)):
+        gaps.append(("NOT CLOSED", d, "listed as dropped; not closed in DECISIONS.md"))
+    for d in sorted(set(sources) - set(closed)):
+        gaps.append(("NOT CLOSED", d, "has an Appendix B source; not closed in DECISIONS.md"))
+    return closed, cited, dropped, gaps
+
+
+def coverage_main(spec: Path, decisions: Path):
+    for f in (spec, decisions):
+        if not f.is_file():
+            sys.exit(f"error: cannot read {f}")
+    closed, cited, dropped, gaps = coverage(spec, decisions)
+    folded = set(cited) & set(closed)
+    print(f"coverage check — {spec.name} against {decisions.name}")
+    print(f"  spec sha256 {hashlib.sha256(spec.read_bytes()).hexdigest()}")
+    print(f"  decisions sha256 {hashlib.sha256(decisions.read_bytes()).hexdigest()}")
+    print(f"  closed in {decisions.name}: {len(closed)}")
+    print(f"  cited in SPEC §1–§11: {len(folded)}; dropped: {len(dropped & set(closed))}\n")
+    for tag, d, why in gaps:
+        print(f"  [{tag}] {d}: {why}")
+    print(f"coverage: {len(gaps)} gap(s)" + ("" if gaps else
+          " — every closed D-number is cited or dropped, nothing cited is unclosed, "
+          "every fold source matches"))
+    sys.exit(1 if gaps else 0)
+
+
 def human_dispute(r):
     """DISPUTED is reported when a human wrote it. Never computed (§5.1)."""
     mark = r.get("disputed")
@@ -351,14 +452,20 @@ def human_dispute(r):
 
 def main():
     ap = argparse.ArgumentParser(description="receipts v0.2-draft reference checker")
-    ap.add_argument("receipts_file", type=Path)
+    ap.add_argument("receipts_file", type=Path, nargs="?")
     ap.add_argument("--sample", type=int, default=0, help="sample size (default: all current receipts)")
     ap.add_argument("--seed", type=int, default=None, help="RNG seed for reproducible samples (one is picked and printed if omitted)")
     ap.add_argument("--all", action="store_true", help="include superseded receipts in the pool")
     ap.add_argument("--today", type=date.fromisoformat, default=date.today(),
                     help="date to check review_by against, YYYY-MM-DD (default: system date)")
     ap.add_argument("--strict", action="store_true", help="make v0.2 schema warnings errors")
+    ap.add_argument("--coverage", nargs=2, type=Path, metavar=("SPEC", "DECISIONS"),
+                    help="check that closed D-numbers are folded or dropped, both ways (SPEC §0)")
     args = ap.parse_args()
+    if args.coverage:
+        coverage_main(*args.coverage)
+    if args.receipts_file is None:
+        ap.error("a receipts file is required unless --coverage is given")
 
     receipts, notes = load_receipts(args.receipts_file)
     base = args.receipts_file.resolve().parent
