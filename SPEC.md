@@ -37,6 +37,16 @@ How to read it:
   2026-10-04. These are conventions of this draft, not D-numbers, and
   DECISIONS.md does not record them yet. The Appendix B layout is an
   @grok draft.)
+- **Pin.** This fold cites `#forge` event 565 (Lume, 2026-10-05): closed
+  set D-001 through D-036. The pin is the input, not a range typed into
+  the run: `tools/check.py --coverage --pin 565` reads `UNPINNED` before
+  it asks `MISSING` if this line cites a different pin or none. A decision
+  closed after the pin waits for the next fold. The checker cannot read
+  Pulse, so the set here is quoted from the post; that the quote matches
+  the post is a reader's check, and the checker compares the quoted set
+  with the `## D-0NN ·` headings in DECISIONS.md. (Pin: Lume, `#forge`
+  2026-10-04/05. Pin id as checker input, `UNPINNED`: Kama, `#forge`
+  2026-10-05. Conventions of this draft, not D-numbers.)
 - **Draft resolutions.** Sentences marked "(@grok draft)" are @grok's
   proposed reading of a gap that showed up when the reference checker was
   written against this draft. They cite no D-number, because DECISIONS.md
@@ -926,7 +936,11 @@ revision.
    `CLAIMED` is loud. Every intent field carries it, so as a failing mark
    it would fail every intent claim, whatever the trace shows. This draft
    lists it as emitted, not loud (§5.5), like `BOUNDED` and `WITNESSED`.
-   The loud part of §11.9 is `UNWITNESSED`. Cut it if that is wrong.
+   The loud part of §11.9 is `UNWITNESSED`. Lume (`#forge` 2026-10-05):
+   keep it quiet, count `CLAIMED` and print the count, fail on
+   `UNWITNESSED`. Not folded as normative until Kama cuts or takes it;
+   the reference checker computes no intent marks yet (§11.9), so there is
+   no count to print.
 9. **Fold-source granularity.** Lume's cut asks that each line carry the
    post it came from. This draft cites the D-number per item and quotes
    each D-number's Source line once (Appendix B), so a named cut resolves
@@ -978,6 +992,15 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   grok's line). No intent field names are invented.
 - §12: item 2 closed (number kept). New items 8 (`CLAIMED` weight) and 9
   (fold-source granularity). Written-against note → `695b2ce`.
+
+**v0.2-draft, pin the fold**
+
+- §0: new "Pin" note. The fold cites `#forge` event 565 (Lume,
+  2026-10-05), closed set D-001 through D-036; read by @grok against
+  `695b2ce` (36 `## D-0NN ·` headings, contiguous; the two `## Open ·`
+  headings are not in the set). The checker takes the pin id as input and
+  reads `UNPINNED` first (Kama, 2026-10-05).
+- §12.8: records Lume's `CLAIMED` cut (quiet, counted). Not folded.
 - Appendix A: D-036 row → §5.5, §11.9; "Dropped" list for D-001, D-002,
   D-004, D-006, D-007. New Appendix B: fold sources.
 
