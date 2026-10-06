@@ -7,7 +7,7 @@
 # Usage:
 #   python3 check.py <report>.receipts.jsonl [--sample N] [--seed S] [--all]
 #                                            [--today YYYY-MM-DD] [--strict]
-#   python3 check.py --coverage SPEC.md DECISIONS.md
+#   python3 check.py --coverage SPEC.md DECISIONS.md --pin 565
 #
 # Verdicts per receipt: OK | CHANGED | MISSING | UNREADABLE | UNFETCHED
 # (superseded receipts are resolved first; only the current set is sampled
@@ -76,6 +76,16 @@
 # cited there or dropped must be closed; none may be both. Each closed
 # D-number needs an Appendix B fold-source line equal (whitespace folded)
 # to its DECISIONS.md **Source:** line. Exit 0 iff no gap.
+#
+# Pin (--pin ID; SPEC §0 "Pin"; Lume and Kama #forge cuts, 2026-10-05):
+# the closed set is the one the pin post lists, and the pin id is an input
+# to the run. The checker cannot read Pulse, so it reads the set as quoted
+# in the SPEC §0 "**Pin.**" line ("event N ... D-AAA through D-BBB"). If
+# --pin is absent, or SPEC cites no pin or another id: UNPINNED, and
+# coverage is not asked. If the quoted set differs from the "## D-0NN ·"
+# headings in DECISIONS.md: PIN DRIFT. Coverage is then asked against the
+# pin set; a D-number closed after the pin is listed, not a gap (it waits
+# for the next fold), unless SPEC already cites it (AHEAD OF PIN).
 #
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
 # the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
@@ -396,11 +406,37 @@ def spec_folds(text):
     return cited, dropped, sources
 
 
-def coverage(spec: Path, decisions: Path):
-    """Bidirectional coverage of closed D-numbers (SPEC §0). Returns gap lines."""
-    closed = closed_decisions(decisions.read_text(encoding="utf-8"))
+PIN_LINE = re.compile(r"\*\*Pin\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S)
+
+
+def spec_pin(text):
+    """(event id, set of D-numbers) quoted in SPEC §0, or None."""
+    m = PIN_LINE.search(text)
+    if not m:
+        return None
+    body = " ".join(m.group(1).split())
+    ev = re.search(r"\bevent (\d+)\b", body)
+    rng = re.search(r"\bD-(\d{3}) through D-(\d{3})\b", body)
+    if not ev or not rng:
+        return None
+    lo, hi = int(rng.group(1)), int(rng.group(2))
+    return ev.group(1), {f"D-{n:03d}" for n in range(lo, hi + 1)}
+
+
+def coverage(spec: Path, decisions: Path, pinned=None):
+    """Bidirectional coverage of the pinned D-set (SPEC §0). Returns gap lines."""
+    all_closed = closed_decisions(decisions.read_text(encoding="utf-8"))
     cited, dropped, sources = spec_folds(spec.read_text(encoding="utf-8"))
     gaps = []
+    if pinned is None:
+        closed = all_closed
+    else:
+        for d in sorted(pinned - set(all_closed)):
+            gaps.append(("PIN DRIFT", d, "in the pin set; not closed in DECISIONS.md"))
+        closed = {d: all_closed.get(d) for d in pinned if d in all_closed}
+        for d in sorted(set(all_closed) - pinned):
+            if d in cited or d in dropped or d in sources:
+                gaps.append(("AHEAD OF PIN", d, "closed after the pin but already folded; re-pin first"))
     for d in sorted(closed):
         if d not in cited and d not in dropped:
             gaps.append(("MISSING", d, "closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped"))
@@ -418,19 +454,33 @@ def coverage(spec: Path, decisions: Path):
         gaps.append(("NOT CLOSED", d, "listed as dropped; not closed in DECISIONS.md"))
     for d in sorted(set(sources) - set(closed)):
         gaps.append(("NOT CLOSED", d, "has an Appendix B source; not closed in DECISIONS.md"))
+    if pinned is not None:  # closed after the pin: reported once, as AHEAD OF PIN
+        gaps = [g for g in gaps if not (g[0] == "NOT CLOSED" and g[1] in all_closed)]
     return closed, cited, dropped, gaps
 
 
-def coverage_main(spec: Path, decisions: Path):
+def coverage_main(spec: Path, decisions: Path, pin=None):
     for f in (spec, decisions):
         if not f.is_file():
             sys.exit(f"error: cannot read {f}")
-    closed, cited, dropped, gaps = coverage(spec, decisions)
-    folded = set(cited) & set(closed)
     print(f"coverage check — {spec.name} against {decisions.name}")
     print(f"  spec sha256 {hashlib.sha256(spec.read_bytes()).hexdigest()}")
     print(f"  decisions sha256 {hashlib.sha256(decisions.read_bytes()).hexdigest()}")
-    print(f"  closed in {decisions.name}: {len(closed)}")
+    cited_pin = spec_pin(spec.read_text(encoding="utf-8"))
+    if pin is None or cited_pin is None or cited_pin[0] != pin:
+        why = ("no --pin given" if pin is None else
+               "SPEC §0 cites no pin" if cited_pin is None else
+               f"SPEC §0 cites pin event {cited_pin[0]}, run pinned to event {pin}")
+        print(f"\n  [UNPINNED] {why}; coverage not asked")
+        print("coverage: UNPINNED")
+        sys.exit(1)
+    later = sorted(set(closed_decisions(decisions.read_text(encoding="utf-8"))) - cited_pin[1])
+    print(f"  pin: event {pin}, {len(cited_pin[1])} D-numbers quoted in SPEC §0")
+    if later:
+        print(f"  closed after the pin (wait for the next fold): {', '.join(later)}")
+    closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])
+    folded = set(cited) & set(closed)
+    print(f"  pinned and closed in {decisions.name}: {len(closed)}")
     print(f"  cited in SPEC §1–§11: {len(folded)}; dropped: {len(dropped & set(closed))}\n")
     for tag, d, why in gaps:
         print(f"  [{tag}] {d}: {why}")
@@ -459,11 +509,13 @@ def main():
     ap.add_argument("--today", type=date.fromisoformat, default=date.today(),
                     help="date to check review_by against, YYYY-MM-DD (default: system date)")
     ap.add_argument("--strict", action="store_true", help="make v0.2 schema warnings errors")
+    ap.add_argument("--pin", metavar="EVENT_ID",
+                    help="#forge pin post id the fold must cite (SPEC §0 Pin); with --coverage")
     ap.add_argument("--coverage", nargs=2, type=Path, metavar=("SPEC", "DECISIONS"),
                     help="check that closed D-numbers are folded or dropped, both ways (SPEC §0)")
     args = ap.parse_args()
     if args.coverage:
-        coverage_main(*args.coverage)
+        coverage_main(*args.coverage, pin=args.pin)
     if args.receipts_file is None:
         ap.error("a receipts file is required unless --coverage is given")
 

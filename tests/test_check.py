@@ -450,6 +450,8 @@ SPEC = """# spec
 
 Mentions D-009 here, which is outside the fold region.
 
+- **Pin.** event 7: closed set D-001 through D-002.
+
 ## 1. Rules
 
 - A rule. (D-002 b)
@@ -474,24 +476,25 @@ Mentions D-009 here, which is outside the fold region.
 class Coverage(unittest.TestCase):
     """SPEC §0 fold source: closed D-numbers cited or dropped, both ways."""
 
-    def cover(self, spec=SPEC, decisions=DECISIONS):
+    def cover(self, spec=SPEC, decisions=DECISIONS, pin="7"):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "SPEC.md").write_text(spec)
             (Path(d) / "DECISIONS.md").write_text(decisions)
             return subprocess.run([sys.executable, str(CHECK), "--coverage",
-                                   str(Path(d) / "SPEC.md"), str(Path(d) / "DECISIONS.md")],
+                                   str(Path(d) / "SPEC.md"), str(Path(d) / "DECISIONS.md")]
+                                  + (["--pin", pin] if pin else []),
                                   capture_output=True, text=True)
 
     def test_repo_spec_covers_repo_decisions(self):
         p = subprocess.run([sys.executable, str(CHECK), "--coverage",
-                            str(ROOT / "SPEC.md"), str(ROOT / "DECISIONS.md")],
+                            str(ROOT / "SPEC.md"), str(ROOT / "DECISIONS.md"), "--pin", "565"],
                            capture_output=True, text=True)
         self.assertIn("coverage: 0 gap(s)", p.stdout)
         self.assertEqual(p.returncode, 0)
 
     def test_complete_fixture_has_no_gap(self):
         p = self.cover()
-        self.assertIn("closed in DECISIONS.md: 2", p.stdout)
+        self.assertIn("pinned and closed in DECISIONS.md: 2", p.stdout)
         self.assertIn("cited in SPEC §1–§11: 1; dropped: 1", p.stdout)
         self.assertIn("coverage: 0 gap(s)", p.stdout)
         self.assertEqual(p.returncode, 0)
@@ -503,7 +506,7 @@ class Coverage(unittest.TestCase):
 
     def test_cited_but_not_closed_is_reported_with_its_line(self):
         p = self.cover(spec=SPEC.replace("(D-002 b)", "(D-002 b, D-003)"))
-        self.assertIn("[NOT CLOSED] D-003: cited in SPEC line 9; not closed", p.stdout)
+        self.assertIn("[NOT CLOSED] D-003: cited in SPEC line 11; not closed", p.stdout)
         self.assertEqual(p.returncode, 1)
 
     def test_open_questions_and_section_0_are_not_folds(self):
@@ -529,6 +532,38 @@ class Coverage(unittest.TestCase):
     def test_missing_fold_source_line(self):
         p = self.cover(spec=SPEC.replace("- **D-001** — #forge, 2026-08-07, @a\n", ""))
         self.assertIn("[NO SOURCE] D-001: no Appendix B fold-source line", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_no_pin_input_is_unpinned_before_missing(self):
+        p = self.cover(spec=SPEC.replace("- D-001 — process only.\n", ""), pin=None)
+        self.assertIn("[UNPINNED] no --pin given", p.stdout)
+        self.assertNotIn("MISSING", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_spec_citing_another_pin_is_unpinned(self):
+        p = self.cover(pin="8")
+        self.assertIn("[UNPINNED] SPEC §0 cites pin event 7, run pinned to event 8", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_spec_citing_no_pin_is_unpinned(self):
+        p = self.cover(spec=SPEC.replace("- **Pin.** event 7: closed set D-001 through D-002.\n", ""))
+        self.assertIn("[UNPINNED] SPEC §0 cites no pin", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_pin_set_not_closed_in_decisions_is_drift(self):
+        p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-001 through D-003"))
+        self.assertIn("[PIN DRIFT] D-003: in the pin set; not closed", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_closed_after_pin_waits_unless_folded(self):
+        late = SPEC.replace("D-001 through D-002", "D-001 through D-001")
+        p = self.cover(spec=late.replace("- A rule. (D-002 b)", "- A rule.").replace(
+            "- **D-002** — #forge, 2026-08-08 (@a, proposal); 2026-08-09 (@b, cut)\n", ""))
+        self.assertIn("closed after the pin (wait for the next fold): D-002", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        p = self.cover(spec=late)
+        self.assertIn("[AHEAD OF PIN] D-002", p.stdout)
+        self.assertNotIn("[NOT CLOSED] D-002", p.stdout)
         self.assertEqual(p.returncode, 1)
 
     def test_receipts_file_required_without_coverage(self):
