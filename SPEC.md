@@ -47,6 +47,19 @@ How to read it:
   with the `## D-0NN ·` headings in DECISIONS.md. (Pin: Lume, `#forge`
   2026-10-04/05. Pin id as checker input, `UNPINNED`: Kama, `#forge`
   2026-10-05. Conventions of this draft, not D-numbers.)
+- **Pin reads.** A reading of the pin leaves a line: who compared the Pin
+  quote above with post 565, when (`#forge` event and date), and against
+  which DECISIONS.md commit. A pin quote with no read line reads
+  `UNWITNESSED`, like any other claim with no trace. Only reads with a
+  trace are listed. Lume's read is Lume's line to write, from a post that
+  names the commit. `tools/check.py --coverage --pin` fails on a pin with
+  no read line, and where git has the commit it compares the
+  `## D-0NN ·` headings in DECISIONS.md at that commit with the quoted set
+  (`PIN READ DRIFT`). That the quote matches the post stays a reader's
+  check. (Pin-read lines, `UNWITNESSED` pin quote: Lume, `#forge`
+  2026-10-06. Convention of this draft, not a D-number.)
+  - @grok, event 568, 2026-10-06: pin 565 read against `695b2ce`.
+  - Kama, event 569, 2026-10-06: pin 565 read against `695b2ce`.
 - **Draft resolutions.** Sentences marked "(@grok draft)" are @grok's
   proposed reading of a gap that showed up when the reference checker was
   written against this draft. They cite no D-number, because DECISIONS.md
@@ -938,9 +951,14 @@ revision.
    lists it as emitted, not loud (§5.5), like `BOUNDED` and `WITNESSED`.
    The loud part of §11.9 is `UNWITNESSED`. Lume (`#forge` 2026-10-05):
    keep it quiet, count `CLAIMED` and print the count, fail on
-   `UNWITNESSED`. Not folded as normative until Kama cuts or takes it;
-   the reference checker computes no intent marks yet (§11.9), so there is
-   no count to print.
+   `UNWITNESSED`. Kama took it (`#forge` 2026-10-06): `CLAIMED` is quiet,
+   counted, printed; `UNWITNESSED` fails. Her narrowing: print the count
+   split per claimant, `CLAIMED` rows whose trace agrees and rows whose
+   trace disagrees (D-036 c), still non-failing. DECISIONS.md does not
+   record the call, so it is recorded here, not folded as normative text.
+   It waits until a decision names the intent fields: the reference
+   checker computes no intent marks yet (§11.9), so there is no count to
+   print.
 9. **Fold-source granularity.** Lume's cut asks that each line carry the
    post it came from. This draft cites the D-number per item and quotes
    each D-number's Source line once (Appendix B), so a named cut resolves
@@ -1003,6 +1021,17 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §12.8: records Lume's `CLAIMED` cut (quiet, counted). Not folded.
 - Appendix A: D-036 row → §5.5, §11.9; "Dropped" list for D-001, D-002,
   D-004, D-006, D-007. New Appendix B: fold sources.
+
+**v0.2-draft, pin reads**
+
+- §0: new "Pin reads" note (Lume, `#forge` 2026-10-06): one line per read
+  of the pin quote, naming who, the event, the date, and the DECISIONS.md
+  commit. Lines for @grok (event 568) and Kama (event 569), both against
+  `695b2ce`. A pin quote with no read line reads `UNWITNESSED`. Lume's
+  line is left for Lume.
+- §12.8: records Kama's call (`#forge` 2026-10-06): `CLAIMED` quiet,
+  counted, printed, split per claimant by trace agrees / disagrees;
+  `UNWITNESSED` fails. Not folded.
 
 **v0.2-draft, fold D-035 (authorization / spend)**
 
