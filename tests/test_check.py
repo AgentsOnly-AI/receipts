@@ -4,6 +4,8 @@
 # checker gap listed in PR #2 ("Spec vs checker gaps").
 
 import hashlib
+import os
+import shutil
 import json
 import subprocess
 import sys
@@ -451,6 +453,8 @@ SPEC = """# spec
 Mentions D-009 here, which is outside the fold region.
 
 - **Pin.** event 7: closed set D-001 through D-002.
+- **Pin reads.** Who read the quote, when, against which commit.
+  - @a, event 8, 2026-08-11: pin 7 read against `abc1234`.
 
 ## 1. Rules
 
@@ -506,7 +510,7 @@ class Coverage(unittest.TestCase):
 
     def test_cited_but_not_closed_is_reported_with_its_line(self):
         p = self.cover(spec=SPEC.replace("(D-002 b)", "(D-002 b, D-003)"))
-        self.assertIn("[NOT CLOSED] D-003: cited in SPEC line 11; not closed", p.stdout)
+        self.assertIn("[NOT CLOSED] D-003: cited in SPEC line 13; not closed", p.stdout)
         self.assertEqual(p.returncode, 1)
 
     def test_open_questions_and_section_0_are_not_folds(self):
@@ -566,10 +570,84 @@ class Coverage(unittest.TestCase):
         self.assertNotIn("[NOT CLOSED] D-002", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    def test_pin_read_line_is_listed(self):
+        p = self.cover()
+        self.assertIn("pin reads naming event 7: 1", p.stdout)
+        self.assertNotIn("UNWITNESSED", p.stdout)
+
     def test_receipts_file_required_without_coverage(self):
         p = subprocess.run([sys.executable, str(CHECK)], capture_output=True, text=True)
         self.assertIn("a receipts file is required unless --coverage is given", p.stderr)
         self.assertNotEqual(p.returncode, 0)
+
+
+READ = "  - @a, event 8, 2026-08-11: pin 7 read against `abc1234`.\n"
+
+
+class PinReads(unittest.TestCase):
+    """SPEC §0 pin reads (Lume #forge 2026-10-06): who read the quote, against which commit."""
+
+    def cover(self, spec=SPEC, at_commit=None, env=None):
+        """Run --coverage --pin 7. at_commit: DECISIONS.md text to commit first;
+        its sha replaces abc1234 in the read line."""
+        with tempfile.TemporaryDirectory() as d:
+            dec = Path(d) / "DECISIONS.md"
+            if at_commit is not None:
+                git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+                subprocess.run(git[:3] + ["init", "-q"], check=True)
+                dec.write_text(at_commit)
+                subprocess.run(git + ["add", "DECISIONS.md"], check=True)
+                subprocess.run(git + ["commit", "-q", "--no-gpg-sign", "-m", "d"], check=True)
+                sha = subprocess.run(git[:3] + ["rev-parse", "--short", "HEAD"], check=True,
+                                     capture_output=True, text=True).stdout.strip()
+                spec = spec.replace("abc1234", sha)
+            dec.write_text(DECISIONS)
+            (Path(d) / "SPEC.md").write_text(spec)
+            return subprocess.run([sys.executable, str(CHECK), "--coverage", str(Path(d) / "SPEC.md"),
+                                   str(dec), "--pin", "7"], capture_output=True, text=True, env=env)
+
+    def test_no_read_line_is_unwitnessed(self):
+        p = self.cover(spec=SPEC.replace(READ, ""))
+        self.assertIn("[UNWITNESSED] pin quote: no SPEC §0 pin-read line names event 7", p.stdout)
+        self.assertIn("coverage: 1 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_read_line_for_another_pin_is_unwitnessed(self):
+        p = self.cover(spec=SPEC.replace("pin 7 read", "pin 6 read"))
+        self.assertIn("[UNWITNESSED] pin quote", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_unpinned_is_asked_before_unwitnessed(self):
+        p = self.cover(spec=SPEC.replace(READ, "").replace("event 7:", "event 6:"))
+        self.assertIn("[UNPINNED]", p.stdout)
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_read_line_verified_at_its_commit_passes(self):
+        p = self.cover(at_commit=DECISIONS)
+        self.assertIn("2 closed headings, equal to the quote", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_commit_set_mismatch_is_pin_read_drift(self):
+        p = self.cover(at_commit=DECISIONS.replace("## D-002 ·", "## Open · D-002 ·"))
+        self.assertIn("[PIN READ DRIFT] pin quote: @a (event 8) read against", p.stdout)
+        self.assertIn("quoted, not closed there: D-002", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_unknown_commit_is_skipped_not_failed(self):
+        p = self.cover()
+        self.assertIn("against abc1234: skipped", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_git_unavailable_is_skipped_not_failed(self):
+        with tempfile.TemporaryDirectory() as empty:
+            p = self.cover(env={**os.environ, "PATH": empty})
+        self.assertIn("against abc1234: skipped, git not available", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
 
 
 if __name__ == "__main__":

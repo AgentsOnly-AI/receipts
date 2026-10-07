@@ -87,6 +87,18 @@
 # pin set; a D-number closed after the pin is listed, not a gap (it waits
 # for the next fold), unless SPEC already cites it (AHEAD OF PIN).
 #
+# Pin reads (SPEC §0 "**Pin reads.**"; Lume #forge cut, 2026-10-06,
+# convention of the draft, not a D-number): each line under that note names
+# who compared the pin quote with the post, the event, the date, and the
+# DECISIONS.md commit ("- WHO, event N, YYYY-MM-DD: pin P read against
+# `SHA`."). No line naming the run's pin: [UNWITNESSED] pin quote, a gap
+# (fails). For each line, when git and the commit are available, the
+# "## D-0NN ·" headings in DECISIONS.md at that commit must equal the quoted
+# set, else PIN READ DRIFT (fails). No git, not a repo, or an unknown
+# commit: a printed skip note, not a fail. The Pulse side (that the quote
+# matches post P, and that the read happened) stays a reader's check: this
+# tool cannot read Pulse and checks only the commit a line names.
+#
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
 # the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
 # trailing newline, re-encoded as UTF-8. Draft form name: lines-utf8-nl
@@ -97,6 +109,7 @@ import hashlib
 import json
 import random
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -423,6 +436,54 @@ def spec_pin(text):
     return ev.group(1), {f"D-{n:03d}" for n in range(lo, hi + 1)}
 
 
+PIN_READS = re.compile(r"\*\*Pin reads\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S)
+READ_LINE = re.compile(r"^\s+- (.+?), event (\d+), (\d{4}-\d{2}-\d{2}): "
+                       r"pin (\d+) read against `([0-9a-f]{7,40})`", re.M)
+
+
+def spec_pin_reads(text):
+    """(who, event, date, pin, commit) for each SPEC §0 pin-read line."""
+    m = PIN_READS.search(text)
+    return READ_LINE.findall(m.group(1)) if m else []
+
+
+def decisions_at(decisions: Path, commit):
+    """DECISIONS.md text at a commit, or (None, why) when git can't say."""
+    try:
+        p = subprocess.run(["git", "-C", str(decisions.resolve().parent), "show",
+                            f"{commit}:./{decisions.name}"], capture_output=True)
+    except OSError:
+        return None, "git not available"
+    if p.returncode != 0:
+        return None, f"{commit}:{decisions.name} not available to git here"
+    return p.stdout.decode("utf-8", "replace"), None
+
+
+def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
+    """Gaps and notes for the SPEC §0 pin-read lines naming this pin."""
+    reads = [r for r in spec_pin_reads(spec_text) if r[3] == pin]
+    gaps, notes = [], []
+    if not reads:
+        gaps.append(("UNWITNESSED", "pin quote", f"no SPEC §0 pin-read line names event {pin}"))
+    for who, ev, day, _, commit in reads:
+        text, why = decisions_at(decisions, commit)
+        if text is None:
+            notes.append(f"pin read {who} (event {ev}, {day}) against {commit}: skipped, {why}")
+            continue
+        heads = set(closed_decisions(text))
+        if heads != quoted:
+            diff = "; ".join(s for s in (
+                "quoted, not closed there: " + ", ".join(sorted(quoted - heads)) if quoted - heads else "",
+                "closed there, not quoted: " + ", ".join(sorted(heads - quoted)) if heads - quoted else "")
+                if s)
+            gaps.append(("PIN READ DRIFT", "pin quote",
+                         f"{who} (event {ev}) read against {commit}: {diff}"))
+        else:
+            notes.append(f"pin read {who} (event {ev}, {day}) against {commit}: "
+                         f"{len(heads)} closed headings, equal to the quote")
+    return reads, gaps, notes
+
+
 def coverage(spec: Path, decisions: Path, pinned=None):
     """Bidirectional coverage of the pinned D-set (SPEC §0). Returns gap lines."""
     all_closed = closed_decisions(decisions.read_text(encoding="utf-8"))
@@ -478,7 +539,13 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
     print(f"  pin: event {pin}, {len(cited_pin[1])} D-numbers quoted in SPEC §0")
     if later:
         print(f"  closed after the pin (wait for the next fold): {', '.join(later)}")
+    reads, read_gaps, read_notes = pin_read_gaps(spec.read_text(encoding="utf-8"),
+                                                 decisions, pin, cited_pin[1])
+    print(f"  pin reads naming event {pin}: {len(reads)} (the Pulse side is a reader's check)")
+    for note in read_notes:
+        print(f"    {note}")
     closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])
+    gaps = read_gaps + gaps
     folded = set(cited) & set(closed)
     print(f"  pinned and closed in {decisions.name}: {len(closed)}")
     print(f"  cited in SPEC §1–§11: {len(folded)}; dropped: {len(dropped & set(closed))}\n")
