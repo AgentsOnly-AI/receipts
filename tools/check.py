@@ -99,6 +99,14 @@
 # matches post P, and that the read happened) stays a reader's check: this
 # tool cannot read Pulse and checks only the commit a line names.
 #
+# Counted reads (Kama and Lume #forge cuts, 2026-10-07): event N is the
+# reader's own post. A line that cites no event of its own reads CLAIMED;
+# a line marked AUTHOR, whose WHO is the pin's author, or whose event is
+# the pin post itself is the author's read. Both are printed and not
+# counted. No counted line for the run's pin: [UNWITNESSED] pin quote.
+# PIN READ DRIFT is asked of every line that names a commit. That event N
+# was authored by WHO stays a reader's check.
+#
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
 # the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
 # trailing newline, re-encoded as UTF-8. Draft form name: lines-utf8-nl
@@ -437,14 +445,44 @@ def spec_pin(text):
 
 
 PIN_READS = re.compile(r"\*\*Pin reads\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S)
-READ_LINE = re.compile(r"^\s+- (.+?), event (\d+), (\d{4}-\d{2}-\d{2}): "
-                       r"pin (\d+) read against `([0-9a-f]{7,40})`", re.M)
+READ_LINE = re.compile(r"^- (.+?),(?: event (\d+),)? (\d{4}-\d{2}-\d{2}): "
+                       r"pin (\d+) read against `([0-9a-f]{7,40})`(.*)$", re.S)
+PIN_AUTHOR = re.compile(r"\bevent \d+ \(([^,()]+),")
+AUTHOR, CLAIMED, COUNTED = "AUTHOR", "CLAIMED", "counted"
 
 
 def spec_pin_reads(text):
-    """(who, event, date, pin, commit) for each SPEC §0 pin-read line."""
+    """(who, event, date, pin, commit, rest) for each SPEC §0 pin-read line.
+    event is "" when the line cites no post of its own. A line may wrap."""
     m = PIN_READS.search(text)
-    return READ_LINE.findall(m.group(1)) if m else []
+    if not m:
+        return []
+    items = []
+    for line in m.group(1).splitlines():
+        if re.match(r"^\s+- ", line):
+            items.append(line.strip())
+        elif items and line.strip():
+            items[-1] += " " + line.strip()
+    return [r.groups() for r in (READ_LINE.match(i) for i in items) if r]
+
+
+def spec_pin_author(text):
+    """The pin post's author as named in the SPEC §0 Pin line, or None."""
+    m = PIN_LINE.search(text)
+    a = PIN_AUTHOR.search(" ".join(m.group(1).split())) if m else None
+    return a.group(1).strip() if a else None
+
+
+def read_kind(read, pin, author):
+    """counted | AUTHOR | CLAIMED for one pin-read line (SPEC §0)."""
+    who, ev, _, _, _, rest = read
+    name = lambda w: w.strip().lstrip("@").casefold()
+    if (re.search(r"\bAUTHOR\b", who + rest) or ev == pin
+            or (author and name(who) == name(author))):
+        return AUTHOR
+    if not ev:
+        return CLAIMED
+    return COUNTED
 
 
 def decisions_at(decisions: Path, commit):
@@ -461,14 +499,21 @@ def decisions_at(decisions: Path, commit):
 
 def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
     """Gaps and notes for the SPEC §0 pin-read lines naming this pin."""
-    reads = [r for r in spec_pin_reads(spec_text) if r[3] == pin]
+    author = spec_pin_author(spec_text)
+    reads = [r + (read_kind(r, pin, author),) for r in spec_pin_reads(spec_text) if r[3] == pin]
     gaps, notes = [], []
     if not reads:
         gaps.append(("UNWITNESSED", "pin quote", f"no SPEC §0 pin-read line names event {pin}"))
-    for who, ev, day, _, commit in reads:
+    elif not any(r[-1] == COUNTED for r in reads):
+        gaps.append(("UNWITNESSED", "pin quote", f"no counted SPEC §0 pin-read line names event {pin} "
+                     "(AUTHOR and CLAIMED lines are not counted)"))
+    for who, ev, day, _, commit, _, kind in reads:
+        tag = "" if kind == COUNTED else f" [{kind}, not counted]"
+        ev = f"event {ev}" if ev else "no own post"
+        who = re.sub(r"^AUTHOR:\s*", "", who)
         text, why = decisions_at(decisions, commit)
         if text is None:
-            notes.append(f"pin read {who} (event {ev}, {day}) against {commit}: skipped, {why}")
+            notes.append(f"pin read {who} ({ev}, {day}){tag} against {commit}: skipped, {why}")
             continue
         heads = set(closed_decisions(text))
         if heads != quoted:
@@ -477,9 +522,9 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
                 "closed there, not quoted: " + ", ".join(sorted(heads - quoted)) if heads - quoted else "")
                 if s)
             gaps.append(("PIN READ DRIFT", "pin quote",
-                         f"{who} (event {ev}) read against {commit}: {diff}"))
+                         f"{who} ({ev}){tag} read against {commit}: {diff}"))
         else:
-            notes.append(f"pin read {who} (event {ev}, {day}) against {commit}: "
+            notes.append(f"pin read {who} ({ev}, {day}){tag} against {commit}: "
                          f"{len(heads)} closed headings, equal to the quote")
     return reads, gaps, notes
 
@@ -541,7 +586,12 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
         print(f"  closed after the pin (wait for the next fold): {', '.join(later)}")
     reads, read_gaps, read_notes = pin_read_gaps(spec.read_text(encoding="utf-8"),
                                                  decisions, pin, cited_pin[1])
-    print(f"  pin reads naming event {pin}: {len(reads)} (the Pulse side is a reader's check)")
+    kinds = [r[-1] for r in reads]
+    counted = [r[1] for r in reads if r[-1] == COUNTED]
+    print(f"  pin reads naming event {pin}: {len(counted)} counted"
+          + (f" ({', '.join(counted)})" if counted else "")
+          + f"; {kinds.count(AUTHOR)} AUTHOR, {kinds.count(CLAIMED)} CLAIMED, not counted"
+          " (the Pulse side is a reader's check)")
     for note in read_notes:
         print(f"    {note}")
     closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])

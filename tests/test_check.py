@@ -650,5 +650,72 @@ class PinReads(unittest.TestCase):
         self.assertEqual(p.returncode, 0)
 
 
+AUTHOR_READ = "  - @b, event 7, 2026-08-10: pin 7 read against `abc1234`. AUTHOR.\n"
+CLAIMED_READ = "  - @c, 2026-08-12: pin 7 read against `abc1234`.\n"
+
+
+class CountedReads(unittest.TestCase):
+    """Counted pin reads (Kama, Lume #forge 2026-10-07): a line names the
+    reader's own post; AUTHOR and CLAIMED lines are printed, not counted."""
+
+    cover = PinReads.cover
+
+    def test_author_line_is_reported_not_counted(self):
+        p = self.cover(spec=SPEC.replace(READ, READ + AUTHOR_READ))
+        self.assertIn("pin reads naming event 7: 1 counted (8); 1 AUTHOR, 0 CLAIMED", p.stdout)
+        self.assertIn("pin read @b (event 7, 2026-08-10) [AUTHOR, not counted] against abc1234",
+                      p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_only_author_line_is_unwitnessed(self):
+        p = self.cover(spec=SPEC.replace(READ, AUTHOR_READ))
+        self.assertIn("pin reads naming event 7: 0 counted; 1 AUTHOR", p.stdout)
+        self.assertIn("[UNWITNESSED] pin quote: no counted SPEC §0 pin-read line names event 7",
+                      p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_line_citing_the_pin_post_is_author_unmarked(self):
+        p = self.cover(spec=SPEC.replace(READ, AUTHOR_READ.replace(" AUTHOR.", "")))
+        self.assertIn("[AUTHOR, not counted]", p.stdout)
+        self.assertIn("[UNWITNESSED] pin quote", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_line_by_the_named_pin_author_is_author(self):
+        spec = SPEC.replace("event 7: closed", "event 7 (@a, 2026-08-10): closed")
+        p = self.cover(spec=spec)
+        self.assertIn("pin read @a (event 8, 2026-08-11) [AUTHOR, not counted]", p.stdout)
+        self.assertIn("[UNWITNESSED] pin quote", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_line_with_no_own_post_is_claimed_not_counted(self):
+        p = self.cover(spec=SPEC.replace(READ, READ + CLAIMED_READ))
+        self.assertIn("1 counted (8); 0 AUTHOR, 1 CLAIMED, not counted", p.stdout)
+        self.assertIn("pin read @c (no own post, 2026-08-12) [CLAIMED, not counted]", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_only_author_and_claimed_lines_are_unwitnessed(self):
+        p = self.cover(spec=SPEC.replace(READ, AUTHOR_READ + CLAIMED_READ))
+        self.assertIn("0 counted; 1 AUTHOR, 1 CLAIMED, not counted", p.stdout)
+        self.assertIn("[UNWITNESSED] pin quote: no counted", p.stdout)
+        self.assertIn("coverage: 1 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_wrapped_author_marker_is_read(self):
+        wrapped = "  - @b, event 9, 2026-08-10: pin 7 read against `abc1234`, 2\n    headings. AUTHOR.\n"
+        p = self.cover(spec=SPEC.replace(READ, READ + wrapped))
+        self.assertIn("1 counted (8); 1 AUTHOR", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_author_line_still_asked_for_drift(self):
+        p = self.cover(spec=SPEC.replace(READ, READ + AUTHOR_READ),
+                       at_commit=DECISIONS.replace("## D-002 ·", "## Open · D-002 ·"))
+        self.assertIn("[PIN READ DRIFT] pin quote: @b (event 7) [AUTHOR, not counted] read against",
+                      p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
