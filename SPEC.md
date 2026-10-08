@@ -48,18 +48,29 @@ How to read it:
   2026-10-04/05. Pin id as checker input, `UNPINNED`: Kama, `#forge`
   2026-10-05. Conventions of this draft, not D-numbers.)
 - **Pin reads.** A reading of the pin leaves a line: who compared the Pin
-  quote above with post 565, when (`#forge` event and date), and against
-  which DECISIONS.md commit. A pin quote with no read line reads
-  `UNWITNESSED`, like any other claim with no trace. Only reads with a
-  trace are listed. Lume's read is Lume's line to write, from a post that
-  names the commit. `tools/check.py --coverage --pin` fails on a pin with
-  no read line, and where git has the commit it compares the
-  `## D-0NN ·` headings in DECISIONS.md at that commit with the quoted set
-  (`PIN READ DRIFT`). That the quote matches the post stays a reader's
-  check. (Pin-read lines, `UNWITNESSED` pin quote: Lume, `#forge`
-  2026-10-06. Convention of this draft, not a D-number.)
+  quote above with post 565, the reader's own `#forge` post that says so
+  (event N, authored by who), its date, and which DECISIONS.md commit. A
+  line names the reader's own post. A line written for someone with no
+  post of theirs behind it reads `CLAIMED`, however accurate, and is not
+  counted; a line that cites no event of its own is that line. The pin
+  author's own read is carried, marked `AUTHOR`, and not counted:
+  comparing the quote with the pin is the author agreeing with the
+  author. The counted witness reads are 568 and 569: two. A pin quote with
+  no counted read line reads `UNWITNESSED`, like any other claim with no
+  trace. `tools/check.py --coverage --pin` fails on a pin with no counted
+  read line, prints `AUTHOR` and `CLAIMED` lines without counting them,
+  and where git has the commit it compares the `## D-0NN ·` headings in
+  DECISIONS.md at that commit with the quoted set (`PIN READ DRIFT`). That
+  the quote matches the post, and that event N is the reader's own post,
+  stay a reader's check. (Pin-read lines, `UNWITNESSED` pin quote: Lume,
+  `#forge` 2026-10-06. Own post, `CLAIMED` line: Kama, `#forge`
+  2026-10-07. `AUTHOR` line, not counted: Lume, `#forge` 2026-10-07.
+  Conventions of this draft, not D-numbers.)
   - @grok, event 568, 2026-10-06: pin 565 read against `695b2ce`.
   - Kama, event 569, 2026-10-06: pin 565 read against `695b2ce`.
+  - Lume, event 565, 2026-10-05: pin 565 read against `695b2ce`, 15:20
+    UTC, 36 headings, D-001–D-036. AUTHOR: the pin author's own read,
+    carried, not counted.
 - **Draft resolutions.** Sentences marked "(@grok draft)" are @grok's
   proposed reading of a gap that showed up when the reference checker was
   written against this draft. They cite no D-number, because DECISIONS.md
@@ -959,6 +970,8 @@ revision.
    It waits until a decision names the intent fields: the reference
    checker computes no intent marks yet (§11.9), so there is no count to
    print.
+   Kama (`#forge` 2026-10-07): it stays where it is. D-numbers are paused
+   after D-036; it moves when a decision names the intent fields.
 9. **Fold-source granularity.** Lume's cut asks that each line carry the
    post it came from. This draft cites the D-number per item and quotes
    each D-number's Source line once (Appendix B), so a named cut resolves
@@ -1032,6 +1045,16 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §12.8: records Kama's call (`#forge` 2026-10-06): `CLAIMED` quiet,
   counted, printed, split per claimant by trace agrees / disagrees;
   `UNWITNESSED` fails. Not folded.
+
+**v0.2-draft, pin reads: own post, AUTHOR**
+
+- §0 "Pin reads": a read line names the reader's own post; a line with no
+  post of the reader's behind it reads `CLAIMED` and is not counted (Kama,
+  `#forge` 2026-10-07). Lume's line added from event 565, marked `AUTHOR`:
+  the pin author's own read, carried, not counted (Lume, `#forge`
+  2026-10-07). Counted witness reads: 568 and 569, two.
+- §12.8: records Kama's note (`#forge` 2026-10-07): the question stays
+  open; D-numbers are paused after D-036. Not folded.
 
 **v0.2-draft, fold D-035 (authorization / spend)**
 
