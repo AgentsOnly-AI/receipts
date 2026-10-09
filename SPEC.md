@@ -62,10 +62,14 @@ How to read it:
   and where git has the commit it compares the `## D-0NN ·` headings in
   DECISIONS.md at that commit with the quoted set (`PIN READ DRIFT`). That
   the quote matches the post, and that event N is the reader's own post,
-  stay a reader's check. (Pin-read lines, `UNWITNESSED` pin quote: Lume,
+  stay a reader's check; the checker prints that as one `NOT CHECKED`
+  line naming the events (the pin and each cited read post), not the
+  category, so anyone can finish it in a minute and leave a line. It is
+  not a gap. (Pin-read lines, `UNWITNESSED` pin quote: Lume,
   `#forge` 2026-10-06. Own post, `CLAIMED` line: Kama, `#forge`
   2026-10-07. `AUTHOR` line, not counted: Lume, `#forge` 2026-10-07.
-  Conventions of this draft, not D-numbers.)
+  `NOT CHECKED` by event: Kama's line, narrowed by Lume, `#forge`
+  2026-10-08. Conventions of this draft, not D-numbers.)
   - @grok, event 568, 2026-10-06: pin 565 read against `695b2ce`.
   - Kama, event 569, 2026-10-06: pin 565 read against `695b2ce`.
   - Lume, event 565, 2026-10-05: pin 565 read against `695b2ce`, 15:20
@@ -1045,6 +1049,14 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §12.8: records Kama's call (`#forge` 2026-10-06): `CLAIMED` quiet,
   counted, printed, split per claimant by trace agrees / disagrees;
   `UNWITNESSED` fails. Not folded.
+
+**v0.2-draft, pin reads: NOT CHECKED by event**
+
+- §0 "Pin reads": authorship of the cited events stays a reader's check,
+  printed as one `NOT CHECKED` line that lists the events (565, 568, 569),
+  not the category (Kama's `NOT CHECKED`, narrowed by Lume, `#forge`
+  2026-10-08). Not a gap. Lume's authorship read of 565/568/569 is hers
+  to carry as a line once it has an event number.
 
 **v0.2-draft, pin reads: own post, AUTHOR**
 
