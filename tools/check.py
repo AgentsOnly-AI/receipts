@@ -105,7 +105,9 @@
 # the pin post itself is the author's read. Both are printed and not
 # counted. No counted line for the run's pin: [UNWITNESSED] pin quote.
 # PIN READ DRIFT is asked of every line that names a commit. That event N
-# was authored by WHO stays a reader's check.
+# was authored by WHO stays a reader's check, printed as one NOT CHECKED
+# line that lists the events (the pin and every cited read post), not the
+# category (Kama and Lume #forge cuts, 2026-10-08). It is not a gap.
 #
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
 # the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
@@ -594,6 +596,8 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
           " (the Pulse side is a reader's check)")
     for note in read_notes:
         print(f"    {note}")
+    events = sorted({pin, *(r[1] for r in reads if r[1])}, key=int)
+    print(f"  NOT CHECKED: authorship of {', '.join(events)} (Pulse not readable)")
     closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])
     gaps = read_gaps + gaps
     folded = set(cited) & set(closed)

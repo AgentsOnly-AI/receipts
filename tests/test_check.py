@@ -717,5 +717,22 @@ class CountedReads(unittest.TestCase):
         self.assertEqual(p.returncode, 1)
 
 
+class NotChecked(unittest.TestCase):
+    """NOT CHECKED lists the events whose authorship is a reader's check
+    (Kama, Lume #forge 2026-10-08), not the category. Not a gap."""
+
+    cover = PinReads.cover
+
+    def test_lists_pin_and_read_events(self):
+        p = self.cover(spec=SPEC.replace(READ, READ + AUTHOR_READ + CLAIMED_READ))
+        self.assertIn("NOT CHECKED: authorship of 7, 8 (Pulse not readable)", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_lists_pin_with_no_read_lines(self):
+        p = self.cover(spec=SPEC.replace(READ, ""))
+        self.assertIn("NOT CHECKED: authorship of 7 (Pulse not readable)", p.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
