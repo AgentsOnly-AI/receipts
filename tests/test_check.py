@@ -480,8 +480,19 @@ Mentions D-009 here, which is outside the fold region.
 class Coverage(unittest.TestCase):
     """SPEC §0 fold source: closed D-numbers cited or dropped, both ways."""
 
-    def cover(self, spec=SPEC, decisions=DECISIONS, pin="7"):
+    def cover(self, spec=SPEC, decisions=DECISIONS, pin="7", at_pin=DECISIONS):
+        """With git installed, the fixture's read line is compared against a
+        real commit of DECISIONS (an uncompared read isn't counted)."""
         with tempfile.TemporaryDirectory() as d:
+            if shutil.which("git"):
+                git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+                subprocess.run(git[:3] + ["init", "-q"], check=True)
+                (Path(d) / "DECISIONS.md").write_text(at_pin)
+                subprocess.run(git + ["add", "DECISIONS.md"], check=True)
+                subprocess.run(git + ["commit", "-q", "--no-gpg-sign", "-m", "d"], check=True)
+                sha = subprocess.run(git[:3] + ["rev-parse", "--short", "HEAD"], check=True,
+                                     capture_output=True, text=True).stdout.strip()
+                spec = spec.replace("abc1234", sha)
             (Path(d) / "SPEC.md").write_text(spec)
             (Path(d) / "DECISIONS.md").write_text(decisions)
             return subprocess.run([sys.executable, str(CHECK), "--coverage",
@@ -561,11 +572,13 @@ class Coverage(unittest.TestCase):
 
     def test_closed_after_pin_waits_unless_folded(self):
         late = SPEC.replace("D-001 through D-002", "D-001 through D-001")
+        early = DECISIONS.replace("## D-002 ·", "## Open · D-002 ·")  # DECISIONS at the pin
         p = self.cover(spec=late.replace("- A rule. (D-002 b)", "- A rule.").replace(
-            "- **D-002** — #forge, 2026-08-08 (@a, proposal); 2026-08-09 (@b, cut)\n", ""))
+            "- **D-002** — #forge, 2026-08-08 (@a, proposal); 2026-08-09 (@b, cut)\n", ""),
+            at_pin=early)
         self.assertIn("closed after the pin (wait for the next fold): D-002", p.stdout)
         self.assertIn("coverage: 0 gap(s)", p.stdout)
-        p = self.cover(spec=late)
+        p = self.cover(spec=late, at_pin=early)
         self.assertIn("[AHEAD OF PIN] D-002", p.stdout)
         self.assertNotIn("[NOT CLOSED] D-002", p.stdout)
         self.assertEqual(p.returncode, 1)
@@ -587,9 +600,12 @@ READ = "  - @a, event 8, 2026-08-11: pin 7 read against `abc1234`.\n"
 class PinReads(unittest.TestCase):
     """SPEC §0 pin reads (Lume #forge 2026-10-06): who read the quote, against which commit."""
 
-    def cover(self, spec=SPEC, at_commit=None, env=None):
+    def cover(self, spec=SPEC, at_commit="", env=None):
         """Run --coverage --pin 7. at_commit: DECISIONS.md text to commit first;
-        its sha replaces abc1234 in the read line."""
+        its sha replaces abc1234 in the read line. Default: commit DECISIONS
+        when git is installed, so reads are compared; None: no commit."""
+        if at_commit == "":
+            at_commit = DECISIONS if shutil.which("git") else None
         with tempfile.TemporaryDirectory() as d:
             dec = Path(d) / "DECISIONS.md"
             if at_commit is not None:
@@ -637,17 +653,27 @@ class PinReads(unittest.TestCase):
         self.assertIn("quoted, not closed there: D-002", p.stdout)
         self.assertEqual(p.returncode, 1)
 
-    def test_unknown_commit_is_skipped_not_failed(self):
-        p = self.cover()
-        self.assertIn("against abc1234: skipped", p.stdout)
-        self.assertEqual(p.returncode, 0)
+    def test_unknown_commit_is_not_compared_not_counted(self):
+        # Kama #forge 2026-10-09: a read that wasn't compared isn't counted as compared.
+        p = self.cover(at_commit=None)
+        self.assertIn("[NOT COMPARED, not counted] against abc1234: skipped", p.stdout)
+        self.assertIn("0 counted; 0 AUTHOR, 0 CLAIMED, 1 NOT COMPARED, not counted", p.stdout)
+        self.assertIn("[UNWITNESSED] pin quote: no counted", p.stdout)
+        self.assertEqual(p.returncode, 1)
 
-    def test_git_unavailable_is_skipped_not_failed(self):
+    def test_git_unavailable_is_not_compared_not_counted(self):
         with tempfile.TemporaryDirectory() as empty:
-            p = self.cover(env={**os.environ, "PATH": empty})
-        self.assertIn("against abc1234: skipped, git not available", p.stdout)
-        self.assertIn("coverage: 0 gap(s)", p.stdout)
-        self.assertEqual(p.returncode, 0)
+            p = self.cover(at_commit=None, env={**os.environ, "PATH": empty})
+        self.assertIn("[NOT COMPARED, not counted] against abc1234: skipped, git not available",
+                      p.stdout)
+        self.assertIn("coverage: 1 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_author_and_claimed_skips_keep_their_kind(self):
+        p = self.cover(spec=SPEC.replace(READ, READ + AUTHOR_READ + CLAIMED_READ), at_commit=None)
+        self.assertIn("[AUTHOR, not counted] against abc1234: skipped", p.stdout)
+        self.assertIn("[CLAIMED, not counted] against abc1234: skipped", p.stdout)
+        self.assertIn("1 AUTHOR, 1 CLAIMED, 1 NOT COMPARED", p.stdout)
 
 
 AUTHOR_READ = "  - @b, event 7, 2026-08-10: pin 7 read against `abc1234`. AUTHOR.\n"
@@ -663,7 +689,7 @@ class CountedReads(unittest.TestCase):
     def test_author_line_is_reported_not_counted(self):
         p = self.cover(spec=SPEC.replace(READ, READ + AUTHOR_READ))
         self.assertIn("pin reads naming event 7: 1 counted (8); 1 AUTHOR, 0 CLAIMED", p.stdout)
-        self.assertIn("pin read @b (event 7, 2026-08-10) [AUTHOR, not counted] against abc1234",
+        self.assertIn("pin read @b (event 7, 2026-08-10) [AUTHOR, not counted] against",
                       p.stdout)
         self.assertIn("coverage: 0 gap(s)", p.stdout)
         self.assertEqual(p.returncode, 0)
