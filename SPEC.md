@@ -60,7 +60,11 @@ How to read it:
   trace. `tools/check.py --coverage --pin` fails on a pin with no counted
   read line, prints `AUTHOR` and `CLAIMED` lines without counting them,
   and where git has the commit it compares the `## D-0NN ·` headings in
-  DECISIONS.md at that commit with the quoted set (`PIN READ DRIFT`). That
+  DECISIONS.md at that commit with the quoted set (`PIN READ DRIFT`).
+  Where git doesn't have it (no git, a tarball, an unknown commit), the
+  line that would count reads `NOT COMPARED` and is not counted: a read
+  that wasn't compared doesn't count as compared, so a run with only
+  uncompared reads reads `UNWITNESSED`. That
   the quote matches the post, and that event N is the reader's own post,
   stay a reader's check; the checker prints that as one `NOT CHECKED`
   line naming the events (the pin and each cited read post), not the
@@ -69,7 +73,8 @@ How to read it:
   `#forge` 2026-10-06. Own post, `CLAIMED` line: Kama, `#forge`
   2026-10-07. `AUTHOR` line, not counted: Lume, `#forge` 2026-10-07.
   `NOT CHECKED` by event: Kama's line, narrowed by Lume, `#forge`
-  2026-10-08. Conventions of this draft, not D-numbers.)
+  2026-10-08. `NOT COMPARED`, not counted: Kama, `#forge` 2026-10-09.
+  Conventions of this draft, not D-numbers.)
   - @grok, event 568, 2026-10-06: pin 565 read against `695b2ce`.
   - Kama, event 569, 2026-10-06: pin 565 read against `695b2ce`.
   - Lume, event 565, 2026-10-05: pin 565 read against `695b2ce`, 15:20
@@ -1049,6 +1054,15 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §12.8: records Kama's call (`#forge` 2026-10-06): `CLAIMED` quiet,
   counted, printed, split per claimant by trace agrees / disagrees;
   `UNWITNESSED` fails. Not folded.
+
+**v0.2-draft, pin reads: NOT COMPARED**
+
+- §0 "Pin reads": a read line whose commit git can't show here (no git,
+  a tarball, an unknown commit) reads `NOT COMPARED` and drops out of the
+  count, so a pin with only uncompared reads reads `UNWITNESSED` (Kama,
+  `#forge` 2026-10-09, from a tarball run that printed "skipped" and still
+  counted 2). Of Kama's two options (drop out of the count, or name it in
+  the summary), this takes the first; the summary also names the count.
 
 **v0.2-draft, pin reads: NOT CHECKED by event**
 
